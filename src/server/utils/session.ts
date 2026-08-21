@@ -126,7 +126,11 @@ async function authenticateWithBearerToken(
   // Call the OIDC provider's userinfo endpoint to validate the token
   let userInfo: { sub?: string; email?: string; email_verified?: boolean };
   try {
-    const userinfoUrl = new URL('../userinfo', oidcServer).href;
+    // Derive userinfo URL from OIDC server base.
+    // Authentik's userinfo is always at /application/o/userinfo/ regardless of provider slug.
+    const baseUrl = new URL(oidcServer);
+    const userinfoUrl = `${baseUrl.origin}/application/o/userinfo/`;
+
     const response = await fetch(userinfoUrl, {
       headers: { Authorization: `Bearer ${token}` },
     });
