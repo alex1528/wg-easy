@@ -15,8 +15,12 @@ type LoginResult =
   | {
       success: true;
       user: UserType;
-    }
-  | {
+  }
+
+  async getByEmail(email: string) {
+    return this.#statements.findByEmail.execute({ email });
+  }
+
       success: false;
       error:
         | 'INCORRECT_CREDENTIALS'
@@ -58,6 +62,11 @@ function createPreparedStatement(db: DBType) {
     findByUsername: db.query.user
       .findFirst({
         where: eq(user.username, sql.placeholder('username')),
+      })
+      .prepare(),
+    findByEmail: db.query.user
+      .findFirst({
+        where: eq(user.email, sql.placeholder('email')),
       })
       .prepare(),
     update: db
