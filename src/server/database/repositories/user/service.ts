@@ -16,11 +16,7 @@ type LoginResult =
       success: true;
       user: UserType;
   }
-
-  async getByEmail(email: string) {
-    return this.#statements.findByEmail.execute({ email });
-  }
-
+  | {
       success: false;
       error:
         | 'INCORRECT_CREDENTIALS'
@@ -118,6 +114,10 @@ export class UserService {
 
   async getByUsername(username: string) {
     return this.#statements.findByUsername.execute({ username });
+  }
+
+  async getByEmail(email: string) {
+    return this.#statements.findByEmail.execute({ email });
   }
 
   async create(username: string, password: string) {
