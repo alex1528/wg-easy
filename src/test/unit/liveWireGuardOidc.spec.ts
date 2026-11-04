@@ -19,18 +19,30 @@ vi.mock('openid-client', () => ({
   skipSubjectCheck,
 }));
 
-vi.mock('#server/utils/oauth', () => ({
-  OAUTH_PROVIDERS: {
-    oidc: {
-      friendlyName: 'OIDC',
-      server: 'https://idp.example.com',
-      scope: 'openid',
+const { getEffectiveOidcConfig } = vi.hoisted(() => ({
+  getEffectiveOidcConfig: vi.fn(),
+}));
+
+vi.mock('#server/utils/oidcRuntime', () => ({ getEffectiveOidcConfig }));
+
+function oidcConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    enabled: true,
+    friendlyName: 'OIDC',
+    server: 'https://idp.example.com',
+    clientId: 'wg-easy-client',
+    clientSecret: 'secret',
+    isConfigured: true,
+    app: {
       clientId: 'wg-easy-client',
       clientSecret: 'secret',
-      params: {},
+      scopes: ['openid'],
+      redirectUri: 'app:/cb',
+      endpointUrl: null,
     },
-  },
-}));
+    ...overrides,
+  };
+}
 
 const IDP = {
   issuer: 'https://idp.example.com',
@@ -72,6 +84,7 @@ beforeEach(() => {
   discovery.mockReset();
   fetchUserInfo.mockReset();
   mockDiscovery();
+  getEffectiveOidcConfig.mockReset().mockResolvedValue(oidcConfig());
 });
 
 describe('verifyLiveWireGuardToken', () => {
@@ -81,8 +94,8 @@ describe('verifyLiveWireGuardToken', () => {
 
     const result = await verifyLiveWireGuardToken({
       accessToken: JWT,
-      audience: 'livewireguard',
-      idTokenAudience: 'wg-easy-client',
+      audiences: ['livewireguard', 'wg-easy-client'],
+      idTokenAudiences: ['wg-easy-client'],
     });
 
     expect(result).toEqual({
@@ -109,8 +122,8 @@ describe('verifyLiveWireGuardToken', () => {
 
     const result = await verifyLiveWireGuardToken({
       accessToken: JWT,
-      audience: 'livewireguard',
-      idTokenAudience: 'wg-easy-client',
+      audiences: ['livewireguard', 'wg-easy-client'],
+      idTokenAudiences: ['wg-easy-client'],
     });
 
     expect(result.ok).toBe(true);
@@ -122,8 +135,8 @@ describe('verifyLiveWireGuardToken', () => {
 
     const result = await verifyLiveWireGuardToken({
       accessToken: JWT,
-      audience: 'livewireguard',
-      idTokenAudience: 'wg-easy-client',
+      audiences: ['livewireguard', 'wg-easy-client'],
+      idTokenAudiences: ['wg-easy-client'],
     });
 
     expect(result).toEqual({ ok: false, reason: 'invalid_token' });
@@ -137,8 +150,8 @@ describe('verifyLiveWireGuardToken', () => {
 
     const result = await verifyLiveWireGuardToken({
       accessToken: JWT,
-      audience: 'livewireguard',
-      idTokenAudience: 'wg-easy-client',
+      audiences: ['livewireguard', 'wg-easy-client'],
+      idTokenAudiences: ['wg-easy-client'],
     });
 
     expect(result).toEqual({ ok: false, reason: 'invalid_token' });
@@ -153,8 +166,8 @@ describe('verifyLiveWireGuardToken', () => {
     const result = await verifyLiveWireGuardToken({
       accessToken: OPAQUE,
       idToken: JWT,
-      audience: 'livewireguard',
-      idTokenAudience: 'wg-easy-client',
+      audiences: ['livewireguard', 'wg-easy-client'],
+      idTokenAudiences: ['wg-easy-client'],
     });
 
     expect(result).toEqual({
@@ -180,8 +193,8 @@ describe('verifyLiveWireGuardToken', () => {
     const result = await verifyLiveWireGuardToken({
       accessToken: OPAQUE,
       idToken: JWT,
-      audience: 'livewireguard',
-      idTokenAudience: 'wg-easy-client',
+      audiences: ['livewireguard', 'wg-easy-client'],
+      idTokenAudiences: ['wg-easy-client'],
     });
 
     expect(result).toEqual({ ok: false, reason: 'invalid_token' });
@@ -198,8 +211,8 @@ describe('verifyLiveWireGuardToken', () => {
 
     const result = await verifyLiveWireGuardToken({
       accessToken: OPAQUE,
-      audience: 'livewireguard',
-      idTokenAudience: 'wg-easy-client',
+      audiences: ['livewireguard', 'wg-easy-client'],
+      idTokenAudiences: ['wg-easy-client'],
     });
 
     expect(result).toEqual({
@@ -223,8 +236,8 @@ describe('verifyLiveWireGuardToken', () => {
 
     const result = await verifyLiveWireGuardToken({
       accessToken: OPAQUE,
-      audience: 'livewireguard',
-      idTokenAudience: 'wg-easy-client',
+      audiences: ['livewireguard', 'wg-easy-client'],
+      idTokenAudiences: ['wg-easy-client'],
     });
 
     expect(result).toEqual({ ok: false, reason: 'invalid_token' });
@@ -236,37 +249,77 @@ describe('verifyLiveWireGuardToken', () => {
 
     const result = await verifyLiveWireGuardToken({
       accessToken: JWT,
-      audience: 'livewireguard',
-      idTokenAudience: 'wg-easy-client',
+      audiences: ['livewireguard', 'wg-easy-client'],
+      idTokenAudiences: ['wg-easy-client'],
     });
 
     expect(result).toEqual({ ok: false, reason: 'server_misconfigured' });
   });
 
   test('missing OIDC configuration yields server_misconfigured', async () => {
-    vi.resetModules();
-    vi.doMock('#server/utils/oauth', () => ({
-      OAUTH_PROVIDERS: {
-        oidc: {
-          friendlyName: 'OIDC',
-          server: '',
-          scope: 'openid',
-          clientId: undefined,
-          clientSecret: undefined,
-          params: {},
-        },
-      },
-    }));
-
-    const { verifyLiveWireGuardToken } =
-      await import('#server/utils/liveWireGuardOidc');
+    const { verifyLiveWireGuardToken } = await importFresh();
+    getEffectiveOidcConfig.mockResolvedValue(
+      oidcConfig({ server: null, clientId: null })
+    );
 
     const result = await verifyLiveWireGuardToken({
       accessToken: OPAQUE,
-      audience: 'livewireguard',
-      idTokenAudience: 'wg-easy-client',
+      audiences: ['livewireguard'],
+      idTokenAudiences: ['wg-easy-client'],
     });
 
     expect(result).toEqual({ ok: false, reason: 'server_misconfigured' });
+  });
+
+  test('accepts an id_token issued to the app client id', async () => {
+    const { verifyLiveWireGuardToken } = await importFresh();
+    jwtVerify.mockResolvedValue({
+      payload: jwtPayload({ aud: 'livewireguard-app' }),
+    });
+
+    const result = await verifyLiveWireGuardToken({
+      accessToken: OPAQUE,
+      idToken: JWT,
+      audiences: ['livewireguard', 'wg-easy-client', 'livewireguard-app'],
+      idTokenAudiences: ['wg-easy-client', 'livewireguard-app'],
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  test('rejects an id_token issued to an unknown client', async () => {
+    const { verifyLiveWireGuardToken } = await importFresh();
+    jwtVerify.mockResolvedValue({
+      payload: jwtPayload({ aud: 'other-app' }),
+    });
+
+    const result = await verifyLiveWireGuardToken({
+      accessToken: OPAQUE,
+      idToken: JWT,
+      audiences: ['livewireguard'],
+      idTokenAudiences: ['wg-easy-client', 'livewireguard-app'],
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'invalid_token' });
+  });
+
+  test('discovery is redone when the OIDC settings change', async () => {
+    const { verifyLiveWireGuardToken } = await importFresh();
+    jwtVerify.mockResolvedValue({ payload: jwtPayload() });
+    const input = {
+      accessToken: JWT,
+      audiences: ['livewireguard'],
+      idTokenAudiences: ['wg-easy-client'],
+    };
+
+    await verifyLiveWireGuardToken(input);
+    await verifyLiveWireGuardToken(input);
+    expect(discovery).toHaveBeenCalledTimes(1);
+
+    getEffectiveOidcConfig.mockResolvedValue(
+      oidcConfig({ server: 'https://other-idp.example.com' })
+    );
+    await verifyLiveWireGuardToken(input);
+    expect(discovery).toHaveBeenCalledTimes(2);
   });
 });

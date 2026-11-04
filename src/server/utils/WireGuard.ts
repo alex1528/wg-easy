@@ -7,6 +7,7 @@ import { mergeClientStatuses } from '#server/utils/clientStatus';
 import { OLD_ENV, WG_ENV } from '#server/utils/config';
 import { firewall } from '#server/utils/firewall';
 import { encodeQRCode } from '#server/utils/qr';
+import { revisionOf } from '#server/utils/oidcSettings';
 import type { ID } from '#server/utils/types';
 import { wg } from '#server/utils/wgHelper';
 import { setIntervalImmediately } from '#shared/utils/time';
@@ -169,6 +170,15 @@ class WireGuard {
       enableIpv6: !WG_ENV.DISABLE_IPV6,
       omitPrivateKey: true,
     });
+  }
+
+  /**
+   * Short hash of the full client configuration. Changes whenever the client
+   * or the global config (host, port, dns, allowed ips, ...) changes.
+   */
+  async getClientConfigRevision({ clientId }: { clientId: ID }) {
+    const config = await this.getClientConfiguration({ clientId });
+    return revisionOf(config);
   }
 
   async getClientQRCodeSVG({ clientId }: { clientId: ID }) {

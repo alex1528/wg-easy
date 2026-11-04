@@ -1,8 +1,7 @@
 import * as client from 'openid-client';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
-import { OAUTH_PROVIDERS } from '#server/utils/oauth';
-import { cacheFunctionAsync } from '#server/utils/cache';
+import { getEffectiveOidcConfig } from '#server/utils/oidcRuntime';
 
 export type TokenIdentity = {
   sub: string;
@@ -19,10 +18,10 @@ type VerifyInput = {
   accessToken: string;
   /** id_token from `X-Id-Token` (optional) */
   idToken?: string;
-  /** allowed audiences for the access_token (LiveWireGuard audience setting) */
-  audience: string;
-  /** audience for the id_token (wg-easy's own OIDC client id) */
-  idTokenAudience: string;
+  /** allowed audiences for a JWT access_token */
+  audiences: string[];
+  /** allowed audiences for the id_token (OIDC client ids) */
+  idTokenAudiences: string[];
 };
 
 const DISCOVERY_CACHE_MS = 15 * 60 * 1000;
@@ -36,18 +35,42 @@ type CachedOidc = {
   issuer: string;
 };
 
-const getOidc = cacheFunctionAsync(
-  async (): Promise<CachedOidc> => {
-    const oidc = OAUTH_PROVIDERS.oidc;
+/**
+ * discovery + JWKS cache, keyed by the effective OIDC settings so that a
+ * change in the admin panel is picked up immediately
+ */
+let oidcCache: {
+  key: string;
+  value: Promise<CachedOidc>;
+  expiry: number;
+} | null = null;
 
-    if (!oidc.server || !oidc.clientId) {
-      throw new MisconfiguredError('OIDC provider is not configured');
-    }
+export function invalidateOidcCache() {
+  oidcCache = null;
+}
 
+async function getOidc(): Promise<CachedOidc> {
+  const effective = await getEffectiveOidcConfig();
+
+  if (!effective.server || !effective.clientId) {
+    throw new MisconfiguredError('OIDC provider is not configured');
+  }
+
+  const server = effective.server;
+  const clientId = effective.clientId;
+  const clientSecret = effective.clientSecret;
+  const key = JSON.stringify([server, clientId, clientSecret]);
+  const now = Date.now();
+
+  if (oidcCache && oidcCache.key === key && oidcCache.expiry > now) {
+    return oidcCache.value;
+  }
+
+  const value = (async () => {
     const config = await client.discovery(
-      new URL(oidc.server),
-      oidc.clientId,
-      oidc.clientSecret ? { client_secret: oidc.clientSecret } : undefined
+      new URL(server),
+      clientId,
+      clientSecret ? { client_secret: clientSecret } : undefined
     );
 
     const metadata = config.serverMetadata();
@@ -61,9 +84,32 @@ const getOidc = cacheFunctionAsync(
       getJwks: createRemoteJWKSet(new URL(metadata.jwks_uri)),
       issuer: metadata.issuer,
     };
-  },
-  { expiry: DISCOVERY_CACHE_MS }
-);
+  })();
+
+  const entry = { key, value, expiry: now + DISCOVERY_CACHE_MS };
+  oidcCache = entry;
+  try {
+    return await value;
+  } catch (err) {
+    // don't cache failures
+    if (oidcCache === entry) {
+      oidcCache = null;
+    }
+    throw err;
+  }
+}
+
+/**
+ * issuer from OIDC discovery (null if discovery fails)
+ */
+export async function getOidcIssuer(): Promise<string | null> {
+  try {
+    const oidc = await getOidc();
+    return oidc.issuer;
+  } catch {
+    return null;
+  }
+}
 
 function isJwt(token: string): boolean {
   return token.split('.').length === 3;
@@ -120,8 +166,8 @@ async function verifyJwt(
  *
  * The access_token can be a JWT or an opaque token; the id_token (optional) is
  * always a JWT. Validation order:
- * 1. JWT access_token (audience: LiveWireGuard audience or wg-easy's client id)
- * 2. JWT id_token (audience: wg-easy's client id; sub must match the access_token)
+ * 1. JWT access_token (audience: LiveWireGuard audience or an OIDC client id)
+ * 2. JWT id_token (audience: panel or app OIDC client id)
  * 3. userinfo endpoint (works for opaque access_tokens)
  */
 export async function verifyLiveWireGuardToken(
@@ -139,15 +185,12 @@ export async function verifyLiveWireGuardToken(
   try {
     if (isJwt(input.accessToken)) {
       // the access_token check is final: no fallback on failure
-      const identity = await verifyJwt(input.accessToken, [
-        input.audience,
-        input.idTokenAudience,
-      ]);
+      const identity = await verifyJwt(input.accessToken, input.audiences);
       return { ok: true, identity };
     }
 
     if (input.idToken && isJwt(input.idToken)) {
-      const identity = await verifyJwt(input.idToken, [input.idTokenAudience]);
+      const identity = await verifyJwt(input.idToken, input.idTokenAudiences);
       return { ok: true, identity };
     }
 

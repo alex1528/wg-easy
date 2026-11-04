@@ -7,7 +7,8 @@
       "general": "通用设置",
       "config": "网络配置",
       "interface": "接口配置",
-      "hooks": "钩子脚本"
+      "hooks": "钩子脚本",
+      "oidc": "OIDC"
     }
   },
   "user": {
@@ -184,7 +185,53 @@
       "firewallEnabled": "启用客户端防火墙",
       "firewallEnabledDesc": "通过 iptables 限制客户端只能访问指定的目标 IP。启用后，可以为每个客户端单独配置允许访问的目标地址列表。"
     },
-    "introText": "欢迎使用管理控制台。\n\n您可以在这里管理通用设置、网络配置、接口配置和钩子脚本。\n\n请从侧边栏选择一个功能模块开始。"
+    "introText": "欢迎使用管理控制台。\n\n您可以在这里管理通用设置、网络配置、接口配置和钩子脚本。\n\n请从侧边栏选择一个功能模块开始。",
+    "oidc": {
+      "panel": "面板登录",
+      "panelDesc": "覆盖 OAUTH_OIDC_* 环境变量。留空的字段使用环境变量。",
+      "enabled": "启用",
+      "enabledDesc": "启用 OIDC 登录。未设置 = 跟随环境变量（OAUTH_PROVIDERS 包含 oidc：{env}）",
+      "friendlyName": "显示名称",
+      "friendlyNameDesc": "登录按钮上的名称（OAUTH_OIDC_NAME）",
+      "server": "Issuer / Server",
+      "serverDesc": "OIDC discovery 地址（OAUTH_OIDC_SERVER）",
+      "clientId": "Client ID",
+      "clientIdDesc": "面板使用的 Client ID（OAUTH_OIDC_CLIENT_ID）",
+      "clientSecret": "Client Secret",
+      "clientSecretDesc": "面板使用的 Client Secret（OAUTH_OIDC_CLIENT_SECRET）。不会回显，留空表示不修改。",
+      "status": "状态",
+      "statusConfigured": "已配置",
+      "statusNotConfigured": "未配置（需要启用，并填写 Server、Client ID 和 Secret）",
+      "panelRedirect": "回调地址",
+      "panelRedirectDesc": "在身份提供方中为面板客户端登记此回调地址",
+      "app": "客户端扫码（LiveWireGuard）",
+      "appDesc": "这些值会写入 LiveWireGuard App 扫描的接入二维码",
+      "appClientId": "App Client ID",
+      "appClientIdDesc": "App 使用的 Client ID。留空 = 使用面板的客户端（及其 Secret）",
+      "appClientSecret": "App Client Secret",
+      "appClientSecretDesc": "仅机密客户端需要，会写入二维码。不会回显。",
+      "appScopes": "Scopes",
+      "appScopesDesc": "空格分隔，必须包含 openid",
+      "appRedirectUri": "App 回调地址",
+      "appRedirectUriDesc": "App 的 Redirect URI，需要在身份提供方中登记",
+      "endpointUrl": "Endpoint 地址",
+      "endpointUrlDesc": "LiveWireGuard 配置接口地址。留空 = 按当前访问域名生成",
+      "preview": "接入二维码",
+      "previewDesc": "二维码中的内容。其中包含 Client Secret，只应展示给可信用户。",
+      "overridden": "已覆盖",
+      "resetToEnv": "恢复为 .env",
+      "resetToPanel": "使用面板客户端",
+      "resetToDefault": "恢复默认值",
+      "usingEnv": "使用 .env 中的值",
+      "usingDefault": "使用默认值",
+      "usingPanelSecret": "使用面板的 Client Secret",
+      "clearSecret": "清除",
+      "keepSecret": "保留已存的值",
+      "secretPlaceholder": "未保存",
+      "secretWillSet": "保存后生效",
+      "secretWillClear": "将被清除（回退到 .env）",
+      "secretStored": "已保存在数据库中"
+    }
   },
   "zod": {
     "generic": {
@@ -243,7 +290,20 @@
     "address": "IP地址",
     "dns": "DNS",
     "allowedIps": "允许的IP",
-    "file": "文件"
+    "file": "文件",
+    "oidc": {
+      "enabled": "OIDC 启用",
+      "friendlyName": "显示名称",
+      "server": "Issuer / Server 必须是合法的 URL",
+      "clientId": "Client ID",
+      "clientSecret": "Client Secret",
+      "appClientId": "App Client ID",
+      "appClientSecret": "App Client Secret",
+      "scopes": "Scopes",
+      "scopesOpenid": "Scopes 必须包含 openid",
+      "redirectUri": "回调地址必须是合法的 URI",
+      "endpointUrl": "Endpoint 地址必须是合法的 URL"
+    }
   },
   "hooks": {
     "preUp": "启动前脚本",
@@ -292,5 +352,19 @@
     "i5Description": "协议模拟数据包（十六进制格式）：<b 0x...>",
     "mtuNote": "具体数值取决于 MTU（最大传输单元）",
     "obfuscationParameters": "AmneziaWG 混淆参数"
+  },
+  "connect": {
+    "title": "连接",
+    "refresh": "刷新",
+    "setupTitle": "LiveWireGuard 接入",
+    "setupDesc": "在 LiveWireGuard App 内扫描此二维码，自动配置 OIDC 登录和服务端 Endpoint。",
+    "endpointDisabled": "LiveWireGuard Endpoint 未启用（管理面板 → 常规），App 将无法拉取配置。",
+    "oidcNotConfigured": "未配置 OIDC",
+    "clientTitle": "WireGuard 配置",
+    "clientDisabled": "此客户端已禁用",
+    "noClient": "你还没有客户端",
+    "generate": "生成",
+    "regenerate": "重新生成",
+    "regenerateDesc": "将新建一个使用新密钥的客户端并显示在这里。旧客户端会保留，可以在下方列表中删除。"
   }
 }

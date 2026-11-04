@@ -41,6 +41,7 @@ export type UpdateClientType = Omit<
   | 'userId'
   | 'interfaceId'
   | 'deviceId'
+  | 'isDefault'
 >;
 
 const name = z

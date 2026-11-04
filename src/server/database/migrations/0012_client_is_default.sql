@@ -1,0 +1,1 @@
+ALTER TABLE `clients_table` ADD `is_default` integer DEFAULT false NOT NULL;

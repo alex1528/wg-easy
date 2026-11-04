@@ -7,7 +7,8 @@
       "general": "General",
       "config": "Config",
       "interface": "Interface",
-      "hooks": "Hooks"
+      "hooks": "Hooks",
+      "oidc": "OIDC"
     }
   },
   "user": {
@@ -206,7 +207,53 @@
       "firewallEnabled": "Enable Per-Client Firewall",
       "firewallEnabledDesc": "Restrict client traffic to specific destination IPs using iptables. When enabled, each client can be configured with allowed destinations."
     },
-    "introText": "Welcome to the admin panel.\n\nHere you can manage the general settings, the configuration, the interface settings and the hooks.\n\nStart by choosing one of the sections in the sidebar."
+    "introText": "Welcome to the admin panel.\n\nHere you can manage the general settings, the configuration, the interface settings and the hooks.\n\nStart by choosing one of the sections in the sidebar.",
+    "oidc": {
+      "panel": "Panel Login",
+      "panelDesc": "Overrides the OAUTH_OIDC_* environment variables. Empty fields use the environment.",
+      "enabled": "Enabled",
+      "enabledDesc": "Enable OIDC login. Not set = use the environment (OAUTH_PROVIDERS contains oidc: {env})",
+      "friendlyName": "Display Name",
+      "friendlyNameDesc": "Name of the login button (OAUTH_OIDC_NAME)",
+      "server": "Issuer / Server",
+      "serverDesc": "OIDC discovery base URL (OAUTH_OIDC_SERVER)",
+      "clientId": "Client ID",
+      "clientIdDesc": "Client ID of the panel (OAUTH_OIDC_CLIENT_ID)",
+      "clientSecret": "Client Secret",
+      "clientSecretDesc": "Client secret of the panel (OAUTH_OIDC_CLIENT_SECRET). Never displayed. Leave empty to keep it.",
+      "status": "Status",
+      "statusConfigured": "Configured",
+      "statusNotConfigured": "Not configured (enabled, server, client id and secret are required)",
+      "panelRedirect": "Redirect URI",
+      "panelRedirectDesc": "Register this redirect URI for the panel client in your identity provider",
+      "app": "Client Setup (LiveWireGuard)",
+      "appDesc": "Values encoded in the setup QR code scanned by the LiveWireGuard app",
+      "appClientId": "App Client ID",
+      "appClientIdDesc": "Client ID the app uses. Empty = use the panel client (and its secret)",
+      "appClientSecret": "App Client Secret",
+      "appClientSecretDesc": "Only for confidential app clients. It is put into the QR code. Never displayed.",
+      "appScopes": "Scopes",
+      "appScopesDesc": "Space separated, must contain openid",
+      "appRedirectUri": "App Redirect URI",
+      "appRedirectUriDesc": "Redirect URI of the app, must be registered in your identity provider",
+      "endpointUrl": "Endpoint URL",
+      "endpointUrlDesc": "LiveWireGuard config endpoint. Empty = derived from the current host",
+      "preview": "Setup QR Code",
+      "previewDesc": "Payload encoded in the QR code. It contains the client secret: only show it to trusted users.",
+      "overridden": "Overridden",
+      "resetToEnv": "Reset to .env",
+      "resetToPanel": "Use panel client",
+      "resetToDefault": "Reset to default",
+      "usingEnv": "Using value from .env",
+      "usingDefault": "Using default",
+      "usingPanelSecret": "Using the panel client secret",
+      "clearSecret": "Clear",
+      "keepSecret": "Keep stored value",
+      "secretPlaceholder": "Not stored",
+      "secretWillSet": "Will be saved",
+      "secretWillClear": "Will be cleared (fall back to .env)",
+      "secretStored": "Stored in database"
+    }
   },
   "zod": {
     "generic": {
@@ -272,7 +319,20 @@
     "address": "IP Address",
     "dns": "DNS",
     "allowedIps": "Allowed IPs",
-    "file": "File"
+    "file": "File",
+    "oidc": {
+      "enabled": "OIDC Enabled",
+      "friendlyName": "Display Name",
+      "server": "Issuer / Server must be a valid URL",
+      "clientId": "Client ID",
+      "clientSecret": "Client Secret",
+      "appClientId": "App Client ID",
+      "appClientSecret": "App Client Secret",
+      "scopes": "Scopes",
+      "scopesOpenid": "Scopes must contain openid",
+      "redirectUri": "Redirect URI must be a valid URI",
+      "endpointUrl": "Endpoint URL must be a valid URL"
+    }
   },
   "hooks": {
     "preUp": "PreUp",
@@ -340,5 +400,19 @@
     "disableCookiesDescription": "Do not answer handshakes with cookie messages when under load. Only affects this side of the tunnel",
     "mtuNote": "Values depend on the MTU",
     "obfuscationParameters": "AmneziaWG Obfuscation Parameters"
+  },
+  "connect": {
+    "title": "Connect",
+    "refresh": "Refresh",
+    "setupTitle": "LiveWireGuard setup",
+    "setupDesc": "Scan this code inside the LiveWireGuard app to set up OIDC login and the server endpoint.",
+    "endpointDisabled": "The LiveWireGuard endpoint is disabled (Admin → General). The app won't be able to fetch its config.",
+    "oidcNotConfigured": "OIDC is not configured",
+    "clientTitle": "WireGuard config",
+    "clientDisabled": "This client is disabled",
+    "noClient": "You don't have a client yet",
+    "generate": "Generate",
+    "regenerate": "Regenerate",
+    "regenerateDesc": "A new client with a new key pair will be created and shown here. Your existing clients are kept and can be deleted in the list below."
   }
 }

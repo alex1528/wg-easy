@@ -33,6 +33,7 @@ export default definePermissionEventHandler(
     );
 
     setHeader(event, 'Content-Type', 'application/octet-stream');
+    setHeader(event, 'Cache-Control', 'no-store');
     return config;
   }
 );

@@ -14,7 +14,7 @@ import {
   verifyLiveWireGuardToken,
   type TokenIdentity,
 } from '#server/utils/liveWireGuardOidc';
-import { OAUTH_PROVIDERS } from '#server/utils/oauth';
+import { getEffectiveOidcConfig } from '#server/utils/oidcRuntime';
 import { createRateLimiter } from '#server/utils/rateLimit';
 import { logSecurityEvent } from '#server/utils/securityLogger';
 import { getTrustedRequestIP } from '#server/utils/trustedProxy';
@@ -27,6 +27,14 @@ import { MaxClientsReachedError } from '#db/repositories/client/service';
 
 // 60 requests per minute per IP
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
+
+function uniqueStrings(values: (string | null | undefined)[]) {
+  return [
+    ...new Set(
+      values.filter((v): v is string => typeof v === 'string' && v !== '')
+    ),
+  ];
+}
 
 function respondError(
   event: H3Event,
@@ -58,11 +66,8 @@ export default defineEventHandler(async (event) => {
 
   // 2) feature switch (404 = transient for the client, not a revocation)
   const lwConfig = await Database.general.getLiveWireGuardConfig();
-  if (
-    !lwConfig.enabled ||
-    !OAUTH_PROVIDERS.oidc.server ||
-    !OAUTH_PROVIDERS.oidc.clientId
-  ) {
+  const oidc = await getEffectiveOidcConfig();
+  if (!lwConfig.enabled || !oidc.server || !oidc.clientId) {
     return respondError(event, 404, 'not_found', 'Endpoint not available');
   }
 
@@ -94,8 +99,12 @@ export default defineEventHandler(async (event) => {
   const verifyResult = await verifyLiveWireGuardToken({
     accessToken,
     idToken,
-    audience: lwConfig.audience,
-    idTokenAudience: OAUTH_PROVIDERS.oidc.clientId,
+    audiences: uniqueStrings([
+      lwConfig.audience,
+      oidc.clientId,
+      oidc.app.clientId,
+    ]),
+    idTokenAudiences: uniqueStrings([oidc.clientId, oidc.app.clientId]),
   });
 
   if (!verifyResult.ok) {

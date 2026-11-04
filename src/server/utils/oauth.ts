@@ -80,7 +80,32 @@ export function isConfiguredOauthProvider(
   return true;
 }
 
-function getEnabledOauthProvider(provider: OAUTH_PROVIDER) {
+async function getEnabledOauthProvider(
+  provider: OAUTH_PROVIDER
+): Promise<ConfiguredOAuthConfig | undefined> {
+  if (provider === 'oidc') {
+    // OIDC can be overridden in the admin panel: resolve at runtime.
+    // dynamic import: config.ts <-> oauth.ts form an import cycle
+    const { getEffectiveOidcConfig } =
+      await import('#server/utils/oidcRuntime');
+    const effective = await getEffectiveOidcConfig();
+    if (
+      !effective.isConfigured ||
+      !effective.server ||
+      !effective.clientId ||
+      !effective.clientSecret
+    ) {
+      return;
+    }
+    return {
+      ...OidcConfig,
+      friendlyName: effective.friendlyName,
+      server: effective.server,
+      clientId: effective.clientId,
+      clientSecret: effective.clientSecret,
+    };
+  }
+
   if (!WG_ENV.OAUTH_PROVIDERS?.includes(provider)) {
     return;
   }
@@ -98,7 +123,7 @@ export async function buildOauthConfig(event: H3Event) {
     });
   }
 
-  const oauthProvider = getEnabledOauthProvider(provider);
+  const oauthProvider = await getEnabledOauthProvider(provider);
   if (!oauthProvider) {
     throw createError({
       statusCode: 403,

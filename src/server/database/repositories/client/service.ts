@@ -12,6 +12,10 @@ import type {
 import { WG_ENV } from '#server/utils/config';
 import Database from '#server/utils/Database';
 import { nextIP } from '#server/utils/ip';
+import {
+  connectClientName,
+  pickConnectClient,
+} from '#server/utils/connectClient';
 import type { ID } from '#server/utils/types';
 import { wg } from '#server/utils/wgHelper';
 import type { DBType } from '#db/sqlite';
@@ -207,65 +211,153 @@ export class ClientService {
   }
 
   async create({ name, expiresAt }: ClientCreateType) {
+    return this.#db.transaction(async (tx) => {
+      const clientId = await this.#insertWithKeys(tx, {
+        // TODO: properly assign user id
+        userId: 1,
+        name,
+        expiresAt,
+        isDefault: false,
+      });
+      return [{ clientId }];
+    });
+  }
+
+  /**
+   * Generate a key pair, allocate the next free addresses and insert a client.
+   * @throws {MaxClientsReachedError} if the address pool is exhausted
+   */
+  async #insertWithKeys(
+    tx: Parameters<Parameters<DBType['transaction']>[0]>[0],
+    input: {
+      userId: ID;
+      name: string;
+      expiresAt: string | null;
+      isDefault: boolean;
+    }
+  ): Promise<ID> {
     const privateKey = await wg.generatePrivateKey();
     const publicKey = await wg.getPublicKey(privateKey);
     const preSharedKey = await wg.generatePreSharedKey();
 
-    return this.#db.transaction(async (tx) => {
-      const clients = await tx.query.client.findMany().execute();
-      const clientInterface = await tx.query.wgInterface
-        .findFirst({
-          where: eq(wgInterface.name, WG_ENV.WG_INTERFACE),
-        })
-        .execute();
+    const clients = await tx.query.client.findMany().execute();
+    const clientInterface = await tx.query.wgInterface
+      .findFirst({
+        where: eq(wgInterface.name, WG_ENV.WG_INTERFACE),
+      })
+      .execute();
 
-      if (!clientInterface) {
-        throw new Error('WireGuard interface not found');
-      }
+    if (!clientInterface) {
+      throw new Error('WireGuard interface not found');
+    }
 
-      const clientConfig = await tx.query.userConfig
-        .findFirst({
-          where: eq(userConfig.id, clientInterface.name),
-        })
-        .execute();
+    const clientConfig = await tx.query.userConfig
+      .findFirst({
+        where: eq(userConfig.id, clientInterface.name),
+      })
+      .execute();
 
-      if (!clientConfig) {
-        throw new Error('WireGuard interface configuration not found');
-      }
+    if (!clientConfig) {
+      throw new Error('WireGuard interface configuration not found');
+    }
 
+    let ipv4Address: string;
+    let ipv6Address: string;
+    try {
       const ipv4Cidr = parseCidr(clientInterface.ipv4Cidr);
-      const ipv4Address = nextIP(4, ipv4Cidr, clients);
+      ipv4Address = nextIP(4, ipv4Cidr, clients);
       const ipv6Cidr = parseCidr(clientInterface.ipv6Cidr);
-      const ipv6Address = nextIP(6, ipv6Cidr, clients);
+      ipv6Address = nextIP(6, ipv6Cidr, clients);
+    } catch (err) {
+      throw new MaxClientsReachedError(err);
+    }
 
-      return await tx
-        .insert(client)
-        .values({
-          name,
-          // TODO: properly assign user id
-          userId: 1,
-          interfaceId: WG_ENV.WG_INTERFACE,
-          expiresAt,
-          privateKey,
-          publicKey,
-          preSharedKey,
-          ipv4Address,
-          ipv6Address,
-          mtu: clientConfig.defaultMtu,
-          jC: clientConfig.defaultJC,
-          jMin: clientConfig.defaultJMin,
-          jMax: clientConfig.defaultJMax,
-          i1: clientConfig.defaultI1,
-          i2: clientConfig.defaultI2,
-          i3: clientConfig.defaultI3,
-          i4: clientConfig.defaultI4,
-          i5: clientConfig.defaultI5,
-          persistentKeepalive: clientConfig.defaultPersistentKeepalive,
-          serverAllowedIps: [],
+    const result = await tx
+      .insert(client)
+      .values({
+        name: input.name,
+        userId: input.userId,
+        interfaceId: WG_ENV.WG_INTERFACE,
+        expiresAt: input.expiresAt,
+        privateKey,
+        publicKey,
+        preSharedKey,
+        ipv4Address,
+        ipv6Address,
+        mtu: clientConfig.defaultMtu,
+        jC: clientConfig.defaultJC,
+        jMin: clientConfig.defaultJMin,
+        jMax: clientConfig.defaultJMax,
+        i1: clientConfig.defaultI1,
+        i2: clientConfig.defaultI2,
+        i3: clientConfig.defaultI3,
+        i4: clientConfig.defaultI4,
+        i5: clientConfig.defaultI5,
+        persistentKeepalive: clientConfig.defaultPersistentKeepalive,
+        serverAllowedIps: [],
+        isDefault: input.isDefault,
+        enabled: true,
+      })
+      .returning({ clientId: client.id })
+      .execute();
+
+    const clientId = result[0]?.clientId;
+    if (clientId === undefined) {
+      throw new Error('Failed to create client');
+    }
+    return clientId;
+  }
+
+  /**
+   * The client shown as the user's connect QR code:
+   * the one marked as default, otherwise the oldest importable one.
+   * Includes WireGuard secrets, never return it from an API directly.
+   */
+  async getConnectClient(userId: ID) {
+    const clients = await this.#db.query.client
+      .findMany({
+        where: eq(client.userId, userId),
+        columns: {
+          id: true,
+          name: true,
           enabled: true,
-        })
-        .returning({ clientId: client.id })
+          deviceId: true,
+          privateKey: true,
+          isDefault: true,
+        },
+      })
+      .execute();
+    const picked = pickConnectClient(clients);
+    if (!picked) {
+      return null;
+    }
+    return {
+      id: picked.id,
+      name: picked.name,
+      enabled: picked.enabled,
+    };
+  }
+
+  /**
+   * Create a new client for the user and make it the default connect client.
+   * Older clients are kept.
+   * @throws {MaxClientsReachedError}
+   */
+  async createConnectClient(user: { id: ID; username: string }) {
+    return this.#db.transaction(async (tx) => {
+      await tx
+        .update(client)
+        .set({ isDefault: false })
+        .where(and(eq(client.userId, user.id), eq(client.isDefault, true)))
         .execute();
+
+      const clientId = await this.#insertWithKeys(tx, {
+        userId: user.id,
+        name: connectClientName(user.username),
+        expiresAt: null,
+        isDefault: true,
+      });
+      return { clientId };
     });
   }
 

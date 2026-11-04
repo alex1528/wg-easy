@@ -65,6 +65,8 @@ export const client = sqliteTable(
     serverEndpoint: text('server_endpoint'),
     /** LiveWireGuard device id (X-Device-Id); null = created from panel/migration */
     deviceId: text('device_id'),
+    /** the client shown as the user's "connect" QR code on the home page */
+    isDefault: int('is_default', { mode: 'boolean' }).notNull().default(false),
     enabled: int({ mode: 'boolean' }).notNull(),
     createdAt: text('created_at')
       .notNull()
