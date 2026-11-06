@@ -5,9 +5,9 @@ import { WG_ENV } from '#server/utils/config';
 import { getOidcIssuer } from '#server/utils/liveWireGuardOidc';
 import { getEffectiveOidcConfig } from '#server/utils/oidcRuntime';
 import {
+  buildSetupLink,
   buildSetupPayload,
   revisionOf,
-  serializeSetupPayload,
   type SetupPayload,
 } from '#server/utils/oidcSettings';
 import { getTrustedRequestHost } from '#server/utils/trustedProxy';
@@ -18,7 +18,7 @@ export type SetupInfo =
       configured: true;
       endpointEnabled: boolean;
       payload: SetupPayload;
-      /** the exact string encoded in the QR code */
+      /** the exact string encoded in the QR code: livewireguard://setup?d=<base64url JSON> */
       text: string;
       revision: string;
     };
@@ -51,7 +51,7 @@ export async function getSetupInfo(event: H3Event): Promise<SetupInfo> {
     endpointUrl: getDefaultEndpointUrl(event),
     issuer,
   });
-  const text = serializeSetupPayload(payload);
+  const text = buildSetupLink(payload);
 
   return {
     configured: true,

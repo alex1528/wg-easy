@@ -96,7 +96,13 @@ Secrets are write-only: the panel never displays them. They are stored in plain 
 
 Instead of filling in the import wizard by hand, the app can scan a setup QR code inside the app. It is shown to every logged-in user on the home page (**Connect → LiveWireGuard setup**) and previewed under **Admin Panel → OIDC**. When OIDC is not configured a placeholder is shown instead.
 
-The QR code contains a JSON document (UTF-8, byte mode). Empty fields are omitted:
+The QR code encodes a link: `livewireguard://setup?d=<base64url(JSON)>`. Next to the QR code the home page offers **Open in LiveWireGuard** (opens the same link, handy on a Mac where the browser and the app run on the same machine) and **Copy link**. On macOS the app can also read the link, or a screenshot of the QR code, from the clipboard (⌘V in the scan dialog). The iOS system camera opens the app directly.
+
+/// note
+Base64url is an encoding, not encryption. It only keeps the content from being readable at a glance; anyone with the link can decode it.
+///
+
+The decoded `d` value is a JSON document (UTF-8). Older apps and tools may also see the bare JSON. Empty fields are omitted:
 
 ```json
 {

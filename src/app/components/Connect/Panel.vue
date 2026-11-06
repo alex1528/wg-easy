@@ -30,6 +30,29 @@
               <p class="text-sm text-gray-500 dark:text-neutral-300">
                 {{ $t('connect.setupDesc') }}
               </p>
+              <div class="flex flex-wrap justify-center gap-2">
+                <a
+                  :href="data.setup.text"
+                  class="inline-flex items-center gap-2 rounded bg-gray-100 px-3 py-2 text-sm transition hover:bg-red-800 hover:text-white dark:bg-neutral-600 dark:text-neutral-300 dark:hover:bg-red-800 dark:hover:text-white"
+                  data-testid="setup-open"
+                >
+                  <IconsLink class="size-4" />
+                  {{ $t('connect.setupOpen') }}
+                </a>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded bg-gray-100 px-3 py-2 text-sm transition hover:bg-red-800 hover:text-white dark:bg-neutral-600 dark:text-neutral-300 dark:hover:bg-red-800 dark:hover:text-white"
+                  data-testid="setup-copy"
+                  @click="copySetupLink(data.setup.text)"
+                >
+                  <IconsCopy class="size-4" />
+                  {{
+                    linkCopied
+                      ? $t('connect.setupCopied')
+                      : $t('connect.setupCopy')
+                  }}
+                </button>
+              </div>
               <p
                 v-if="!data.setup.endpointEnabled"
                 class="flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400"
@@ -133,6 +156,17 @@ const placeholderClass =
   'flex size-52 items-center justify-center rounded border-2 border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-400 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-400';
 
 const data = ref<ConnectData | null>(null);
+const linkCopied = ref(false);
+
+async function copySetupLink(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    linkCopied.value = true;
+    setTimeout(() => (linkCopied.value = false), 1600);
+  } catch (e) {
+    console.error('failed to copy setup link', e);
+  }
+}
 const loading = ref(false);
 const creating = ref(false);
 

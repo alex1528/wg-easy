@@ -3,6 +3,8 @@ import { describe, expect, test } from 'vitest';
 import {
   DEFAULT_APP_REDIRECT_URI,
   DEFAULT_APP_SCOPES,
+  SETUP_LINK_PREFIX,
+  buildSetupLink,
   buildSetupPayload,
   resolveOidcConfig,
   revisionOf,
@@ -219,5 +221,61 @@ describe('buildSetupPayload', () => {
       )
     );
     expect(revisionOf(changed)).not.toBe(revisionOf(a));
+  });
+});
+
+describe('buildSetupLink', () => {
+  const endpointUrl = 'https://panel.example.com/api/livewireguard/config';
+
+  test('is livewireguard://setup?d=<base64url JSON> and round-trips', () => {
+    const payload = buildSetupPayload(resolveOidcConfig(env, null), {
+      endpointUrl,
+      issuer: 'https://idp.example.com/app/',
+    });
+    const link = buildSetupLink(payload);
+
+    expect(link.startsWith(SETUP_LINK_PREFIX)).toBe(true);
+    const encoded = link.slice(SETUP_LINK_PREFIX.length);
+    // base64url: URL-safe, no padding
+    expect(encoded).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(
+      JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
+    ).toEqual(payload);
+  });
+
+  test('does not show the content in plain text', () => {
+    const payload = buildSetupPayload(resolveOidcConfig(env, null), {
+      endpointUrl,
+    });
+    const link = buildSetupLink(payload);
+    expect(link).not.toContain('panel-secret');
+    expect(link).not.toContain('livewireguard-setup');
+  });
+
+  test('keeps non-ASCII names intact', () => {
+    const payload = buildSetupPayload(
+      resolveOidcConfig({ ...env, friendlyName: '公司单点登录' }, null),
+      { endpointUrl }
+    );
+    const link = buildSetupLink(payload);
+    const decoded = JSON.parse(
+      Buffer.from(link.slice(SETUP_LINK_PREFIX.length), 'base64url').toString(
+        'utf8'
+      )
+    );
+    expect(decoded.name).toBe('公司单点登录');
+  });
+
+  test('revision follows the link', () => {
+    const a = buildSetupLink(
+      buildSetupPayload(resolveOidcConfig(env, null), { endpointUrl })
+    );
+    const b = buildSetupLink(
+      buildSetupPayload(
+        resolveOidcConfig(env, { ...emptyRow, appScopes: 'openid' }),
+        { endpointUrl }
+      )
+    );
+    expect(revisionOf(a)).not.toBe(revisionOf(b));
   });
 });

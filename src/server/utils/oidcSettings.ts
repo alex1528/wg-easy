@@ -216,6 +216,23 @@ export function serializeSetupPayload(payload: SetupPayload) {
   return JSON.stringify(payload);
 }
 
+export const SETUP_LINK_PREFIX = 'livewireguard://setup?d=';
+
+/**
+ * The string encoded in the setup QR code:
+ * `livewireguard://setup?d=<base64url(UTF-8 JSON)>`.
+ *
+ * Base64url is an encoding, not encryption: it only keeps the content from
+ * being readable at a glance. The same link works for the QR code, an
+ * "Open in LiveWireGuard" button and the iOS system camera.
+ */
+export function buildSetupLink(payload: SetupPayload) {
+  const encoded = Buffer.from(serializeSetupPayload(payload), 'utf8').toString(
+    'base64url'
+  );
+  return `${SETUP_LINK_PREFIX}${encoded}`;
+}
+
 /** short, stable hash used to detect changes on the client side */
 export function revisionOf(text: string) {
   return sha256(text).slice(0, 12);
