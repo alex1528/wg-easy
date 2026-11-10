@@ -24,15 +24,15 @@ The endpoint does not use wg-easy session authentication. Requests are authentic
 
 ## Setup
 
-1. Configure OIDC login as described in [External Authentication](./external-authentication.md). The app and the panel can share the same identity provider.
+1. Configure OIDC login as described in [External Authentication](../advanced/config/external-authentication.md) (for Authentik see the [Authentik SSO guide](./authentik-sso.md)). The app and the panel can share the same identity provider.
 2. Register the LiveWireGuard app as a **public client** in your identity provider:
 
-   | Setting           | Value                                                          |
-   | ----------------- | -------------------------------------------------------------- |
-   | Client ID         | `livewireguard` (or your own — see [Audience](#audience))      |
-   | Flow              | Authorization Code + PKCE (S256), token endpoint auth: `none`  |
-   | Redirect URI      | `com.wuxichaorongtechnologycoltd.livewireguard:/oidc/callback` |
-   | Scopes            | `openid profile email offline_access`                          |
+    | Setting      | Value                                                          |
+    | ------------ | -------------------------------------------------------------- |
+    | Client ID    | `livewireguard` (or your own — see [Audience](#audience))      |
+    | Flow         | Authorization Code + PKCE (S256), token endpoint auth: `none`  |
+    | Redirect URI | `com.wuxichaorongtechnologycoltd.livewireguard:/oidc/callback` |
+    | Scopes       | `openid profile email offline_access`                          |
 
 3. Enable the feature: **Admin Panel → General Settings → LiveWireGuard → Enabled**.
 
@@ -77,18 +77,18 @@ Responses are cached by the app and revalidated with an `ETag` (`If-None-Match` 
 
 **Admin Panel → OIDC** overrides the `OAUTH_OIDC_*` environment variables at runtime. Every field falls back to the environment (or a default) when it is left empty, and changes apply immediately without a restart.
 
-| Field              | Environment / default                                          |
-| ------------------ | -------------------------------------------------------------- |
-| Enabled            | `OAUTH_PROVIDERS` contains `oidc`                              |
-| Display Name       | `OAUTH_OIDC_NAME`, default `OIDC`                              |
-| Issuer / Server    | `OAUTH_OIDC_SERVER`                                            |
-| Client ID          | `OAUTH_OIDC_CLIENT_ID`                                         |
-| Client Secret      | `OAUTH_OIDC_CLIENT_SECRET`                                     |
-| App Client ID      | the panel Client ID                                            |
-| App Client Secret  | the panel Client Secret when App Client ID is empty, else none |
-| Scopes             | `openid profile email offline_access`                          |
-| App Redirect URI   | `com.wuxichaorongtechnologycoltd.livewireguard:/oidc/callback` |
-| Endpoint URL       | `<current origin>/api/livewireguard/config`                    |
+| Field             | Environment / default                                          |
+| ----------------- | -------------------------------------------------------------- |
+| Enabled           | `OAUTH_PROVIDERS` contains `oidc`                              |
+| Display Name      | `OAUTH_OIDC_NAME`, default `OIDC`                              |
+| Issuer / Server   | `OAUTH_OIDC_SERVER`                                            |
+| Client ID         | `OAUTH_OIDC_CLIENT_ID`                                         |
+| Client Secret     | `OAUTH_OIDC_CLIENT_SECRET`                                     |
+| App Client ID     | the panel Client ID                                            |
+| App Client Secret | the panel Client Secret when App Client ID is empty, else none |
+| Scopes            | `openid profile email offline_access`                          |
+| App Redirect URI  | `com.wuxichaorongtechnologycoltd.livewireguard:/oidc/callback` |
+| Endpoint URL      | `<current origin>/api/livewireguard/config`                    |
 
 Secrets are write-only: the panel never displays them. They are stored in plain text in the SQLite database, like the session secret. OIDC counts as configured when it is enabled and server, client id and client secret are all set. With `DISABLE_PASSWORD_AUTH=true` the panel refuses to save settings that would leave no way to log in.
 
@@ -106,28 +106,28 @@ The decoded `d` value is a JSON document (UTF-8). Older apps and tools may also 
 
 ```json
 {
-  "type": "livewireguard-setup",
-  "v": 1,
-  "name": "OIDC",
-  "issuer": "https://idp.example.com/application/o/wg-easy/",
-  "client_id": "livewireguard",
-  "client_secret": "only-for-confidential-clients",
-  "scopes": ["openid", "profile", "email", "offline_access"],
-  "redirect_uri": "com.wuxichaorongtechnologycoltd.livewireguard:/oidc/callback",
-  "endpoint": "https://vpn.example.com/api/livewireguard/config"
+    "type": "livewireguard-setup",
+    "v": 1,
+    "name": "OIDC",
+    "issuer": "https://idp.example.com/application/o/wg-easy/",
+    "client_id": "livewireguard",
+    "client_secret": "only-for-confidential-clients",
+    "scopes": ["openid", "profile", "email", "offline_access"],
+    "redirect_uri": "com.wuxichaorongtechnologycoltd.livewireguard:/oidc/callback",
+    "endpoint": "https://vpn.example.com/api/livewireguard/config"
 }
 ```
 
-| Key             | Meaning                                                                   |
-| --------------- | ------------------------------------------------------------------------- |
-| `type`, `v`     | always `livewireguard-setup` / `1`; apps should reject unknown versions   |
-| `name`          | display name of the identity provider                                     |
-| `issuer`        | issuer from OIDC discovery (falls back to the configured server URL)      |
-| `client_id`     | client id the app signs in with                                           |
-| `client_secret` | only present when a secret is configured for that client                  |
-| `scopes`        | scopes to request                                                         |
-| `redirect_uri`  | redirect URI registered for the app                                       |
-| `endpoint`      | full URL of the provisioning endpoint                                     |
+| Key             | Meaning                                                                 |
+| --------------- | ----------------------------------------------------------------------- |
+| `type`, `v`     | always `livewireguard-setup` / `1`; apps should reject unknown versions |
+| `name`          | display name of the identity provider                                   |
+| `issuer`        | issuer from OIDC discovery (falls back to the configured server URL)    |
+| `client_id`     | client id the app signs in with                                         |
+| `client_secret` | only present when a secret is configured for that client                |
+| `scopes`        | scopes to request                                                       |
+| `redirect_uri`  | redirect URI registered for the app                                     |
+| `endpoint`      | full URL of the provisioning endpoint                                   |
 
 /// warning
 The QR code includes the client secret when one is configured. Anyone who can see the home page can read it. Prefer registering the app as a public client (no secret) with its own **App Client ID**.

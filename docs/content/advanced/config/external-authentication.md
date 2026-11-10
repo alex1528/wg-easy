@@ -157,6 +157,10 @@ docker run --rm authelia/authelia:latest authelia crypto hash generate pbkdf2 --
   token_endpoint_auth_method: client_secret_post
 ```
 
+##### Authentik Setup
+
+See the dedicated [Authentik SSO guide](../../guides/authentik-sso.md) — a full walkthrough including the custom `email` scope mapping wg-easy requires (`email_verified` must be `true`, which Authentik's default mapping does not provide).
+
 ##### [VoidAuth](https://voidauth.app/#/) Setup
 
 1. In VoidAuth, create a new OIDC App.
