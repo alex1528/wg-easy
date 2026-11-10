@@ -19,7 +19,10 @@ services:
       - /lib/modules:/lib/modules:ro
     ports:
       - "51820:51820/udp"
-      # 51821/tcp 改由下面的 caddy 以 HTTPS 对外提供
+      # 不再发布 51821/tcp：wg-easy 仍在自己容器内监听 10.42.42.42:51821（纯 HTTP），
+      # 只供 caddy 通过内部网络访问；宿主机的 51821/tcp 由 caddy 发布，对外提供 HTTPS。
+      # 两个容器各有独立的网络命名空间，同一端口号互不冲突；
+      # 只有两边都发布到宿主机、或改成 network_mode: host 时才会冲突
     restart: unless-stopped
     # 日志经 Docker 的 syslog 驱动发给 CrowdSec，用于检测 2FA 爆破等（不需要挂载 docker.sock）
     # 故意不写 depends_on crowdsec：CrowdSec 出问题（如镜像拉不下来）时 VPN 照常启动
@@ -59,6 +62,8 @@ services:
       context: ./caddy
       args:
         CADDY_VERSION: ${CADDY_VERSION:-2}
+        # 基础镜像前缀，留空 = Docker Hub；连不上时见 scripts/mirror-images.sh
+        CADDY_BASE_REGISTRY: ${CADDY_BASE_REGISTRY:-}
         GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
     image: ${CADDY_IMAGE:-wg-easy-caddy:ratelimit-dns}
     container_name: wg-easy-caddy
@@ -111,8 +116,9 @@ services:
         ipv6_address: fdcc:ad94:bacf:61a3::2b
 
   crowdsec:
-    # 国内拉取慢可在 .env 设置 CROWDSEC_IMAGE 换成自己的镜像仓库地址
-    image: ${CROWDSEC_IMAGE:-crowdsecurity/crowdsec:latest}
+    # 固定版本，不用 latest，避免升级后行为变化
+    # 连不上 Docker Hub 时，用 scripts/mirror-images.sh 同步到 CCR，再在 .env 设置 CROWDSEC_IMAGE
+    image: ${CROWDSEC_IMAGE:-crowdsecurity/crowdsec:v1.8.2}
     container_name: wg-easy-crowdsec
     restart: unless-stopped
     security_opt:

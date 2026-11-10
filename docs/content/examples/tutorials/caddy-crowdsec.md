@@ -57,6 +57,36 @@ CrowdSec 的本地 API（8080）不对外发布，只有 Caddy 能通过内部�
 }
 ```
 
+### 服务器连不上 Docker Hub
+
+`crowdsecurity/crowdsec`，以及编译 Caddy 用的 `caddy:2-builder-alpine`、`caddy:2-alpine`，都在 Docker Hub 上。国内服务器拉取时常见 `TLS handshake timeout`。二选一：
+
+**方式一：腾讯云服务器用内网加速。** 只在腾讯云 CVM 和轻量应用服务器的内网可用。在 `/etc/docker/daemon.json` 中加入下面的配置（已有其他配置时合并进去），然后执行 `sudo systemctl restart docker`：
+
+```json
+{
+    "registry-mirrors": ["https://mirror.ccs.tencentyun.com"]
+}
+```
+
+重启 Docker 会让 wg-easy 断开几秒。执行 `docker info | grep -A1 'Registry Mirrors'` 确认生效后，直接继续下面的步骤，`.env` 不用改。
+
+**方式二：同步到自己的 CCR 仓库。** 在能访问 Docker Hub 的机器上运行（海外机器、开了代理的电脑，或已配好方式一的腾讯云服务器）：
+
+```shell
+docker login ccr.ccs.tencentyun.com
+bash scripts/mirror-images.sh
+```
+
+脚本会把 CrowdSec 和两个 Caddy 基础镜像推送到 `ccr.ccs.tencentyun.com/vpn-server/`。提示仓库不存在时，先在容器镜像服务控制台创建 `crowdsec` 和 `caddy` 两个仓库。然后在服务器的 `.env` 中设置：
+
+```ini
+CROWDSEC_IMAGE=ccr.ccs.tencentyun.com/vpn-server/crowdsec:v1.8.2
+CADDY_BASE_REGISTRY=ccr.ccs.tencentyun.com/vpn-server/
+```
+
+`CADDY_BASE_REGISTRY` 只影响编译 Caddy 镜像。如果按“第 2 步 方式一”在别的机器上编译好推送，服务器只拉 `CADDY_IMAGE`，可以不设。
+
 ## 第 1 步：准备 .env
 
 ```shell
@@ -103,7 +133,8 @@ TENCENTCLOUD_SECRET_KEY=xxxxxxxxxxxxxxxx
 | `CADDY_DNS_RESOLVERS`         | `119.29.29.29 223.5.5.5`                                | DNS 验证时检查 TXT 记录用的 DNS 服务器                                       |
 | `CROWDSEC_DISABLE_ONLINE_API` | `false`                                                 | `true` 表示只在本地运行，不连 CrowdSec 中央服务器，也收不到社区黑名单        |
 | `CROWDSEC_ENROLL_KEY`         | 空                                                      | 可选，填入后实例会出现在 app.crowdsec.net 控制台                             |
-| `CROWDSEC_IMAGE`              | `crowdsecurity/crowdsec:latest`                         | Docker Hub 拉不下来时换成自己的镜像仓库                                      |
+| `CROWDSEC_IMAGE`              | `crowdsecurity/crowdsec:v1.8.2`                         | Docker Hub 拉不下来时改用 CCR，见“服务器连不上 Docker Hub”                    |
+| `CADDY_BASE_REGISTRY`         | 空                                                       | 编译 Caddy 的基础镜像前缀，末尾带 `/`，如 `ccr.ccs.tencentyun.com/vpn-server/` |
 | `CROWDSEC_NOTIFY`             | 空                                                      | 封禁通知渠道：`wecom`、`dingtalk`、`telegram`，留空不推送，见“封禁通知”一节  |
 | `CADDY_IMAGE`                 | 空                                                      | 服务器直接拉取的 Caddy 镜像；留空则使用本地镜像或现场编译                    |
 | `CADDY_IMAGE_REPO`            | `ccr.ccs.tencentyun.com/vpn-server/caddy-ratelimit-dns` | `scripts/caddy-image.sh` 的推送目标                                          |
@@ -440,6 +471,8 @@ docker compose -f docker-compose-dirty.yml up -d --force-recreate crowdsec caddy
 | `cscli metrics` 中 syslog 行数为 0                           | 检查 Docker 版本（需 20.10+），以及 `docker inspect wg-easy --format '{{.HostConfig.LogConfig}}'` 是否为 syslog 驱动                       |
 | 自己被封了                                                   | 在服务器上执行 `cscli alerts delete --ip <IP>`（解封并清零递增计数），并把自己的 IP 加入 CrowdSec 白名单                                                      |
 | 收不到封禁通知                                               | 先看“封禁通知 → 验证”；再看 `docker logs wg-easy-crowdsec` 中 `http-plugin` 的报错。国内服务器通常连不上 Telegram                          |
+| 拉取镜像报 `TLS handshake timeout`，地址是 `registry-1.docker.io` | 服务器连不上 Docker Hub，见“前置条件 → 服务器连不上 Docker Hub” |
+| 登录页提示“无法通过不安全连接登录。请使用 HTTPS。” | 浏览器地址是 `http://`，而且页面是 wg-easy 直接返回的，没有经过 Caddy：通常是旧的 wg-easy 容器还在占用宿主机 51821（`docker ps` 能看到 `0.0.0.0:51821->51821/tcp` 映射在 wg-easy 上），或者 Caddy 没有运行。确认 Caddy 镜像可用后，执行 `docker compose -f docker-compose-dirty.yml up -d --force-recreate --remove-orphans` |
 
 ## 已知限制
 

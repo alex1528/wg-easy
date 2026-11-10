@@ -11,6 +11,7 @@
 #   CADDY_IMAGE_REPO  推送目标，默认 ccr.ccs.tencentyun.com/vpn-server/caddy-ratelimit-dns
 #   CADDY_VERSION     Caddy 主版本或固定小版本，默认 2（插件不兼容时改成 2.9 之类）
 #   GOPROXY           Go 模块代理，默认 https://goproxy.cn,direct
+#   CADDY_BASE_REGISTRY  基础镜像前缀，默认空（Docker Hub）；连不上时见 scripts/mirror-images.sh
 #   CCR_USERNAME 和 CCR_PASSWORD  两个都设置时自动 docker login（CI 用）；否则使用已有登录状态
 set -euo pipefail
 # Git Bash 下禁止把 /tmp/... 这类参数自动改写成 Windows 路径
@@ -30,7 +31,7 @@ while [ $# -gt 0 ]; do
     --no-latest)  LATEST=0 ;;
     --platform)   shift; PLATFORMS="${1:-}"; [ -n "$PLATFORMS" ] || die "--platform 需要参数，如 linux/amd64,linux/arm64" ;;
     --platform=*) PLATFORMS="${1#*=}" ;;
-    -h|--help)    sed -n '2,14p' "$0"; exit 0 ;;
+    -h|--help)    sed -n '2,15p' "$0"; exit 0 ;;
     *)            die "未知参数: $1（-h 查看帮助）" ;;
   esac
   shift
@@ -49,6 +50,9 @@ CADDY_VERSION="${CADDY_VERSION:-$(env_get CADDY_VERSION)}"
 CADDY_VERSION="${CADDY_VERSION:-2}"
 GOPROXY="${GOPROXY:-$(env_get GOPROXY)}"
 GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
+CADDY_BASE_REGISTRY="${CADDY_BASE_REGISTRY:-$(env_get CADDY_BASE_REGISTRY)}"
+# 补上末尾的 /，免得拼成 ccr.ccs.tencentyun.com/vpn-servercaddy
+if [ -n "$CADDY_BASE_REGISTRY" ]; then CADDY_BASE_REGISTRY="${CADDY_BASE_REGISTRY%/}/"; fi
 REGISTRY="${REPO%%/*}"
 BUILD_TAG="wg-easy-caddy:build-$$"
 LOCAL_ALIAS="wg-easy-caddy:ratelimit-dns"   # compose 默认使用的本地标签
@@ -67,6 +71,7 @@ trap cleanup EXIT
 echo "目标仓库 : $REPO"
 echo "Caddy    : $CADDY_VERSION"
 echo "GOPROXY  : $GOPROXY"
+echo "基础镜像 : ${CADDY_BASE_REGISTRY:-Docker Hub }caddy:$CADDY_VERSION-*"
 echo "推送     : $([ "$PUSH" = 1 ] && echo "是${PLATFORMS:+（$PLATFORMS）}" || echo 否)"
 echo
 
@@ -74,6 +79,7 @@ echo
 echo "==> [1/4] 构建镜像"
 docker build --pull \
   --build-arg CADDY_VERSION="$CADDY_VERSION" \
+  --build-arg CADDY_BASE_REGISTRY="$CADDY_BASE_REGISTRY" \
   --build-arg GOPROXY="$GOPROXY" \
   -t "$BUILD_TAG" caddy
 
@@ -162,6 +168,7 @@ else
   docker buildx build --builder "$BUILDER" \
     --platform "$PLATFORMS" \
     --build-arg CADDY_VERSION="$CADDY_VER" \
+    --build-arg CADDY_BASE_REGISTRY="$CADDY_BASE_REGISTRY" \
     --build-arg GOPROXY="$GOPROXY" \
     "${tag_args[@]}" --push caddy \
     || die "$push_hint（跨架构编译还需要 QEMU：docker run --privileged --rm tonistiigi/binfmt --install all）"
