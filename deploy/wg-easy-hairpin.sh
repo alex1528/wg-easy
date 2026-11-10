@@ -23,11 +23,14 @@
 # 规则建在容器自己的网络命名空间里，容器重启后由本脚本重新添加；wg-easy 重启接口（PostDown/PostUp）不会删除它们。
 # 域名改了解析，需要重启 wg-easy 容器才会更新规则。
 
+# 规则逻辑全部在子 shell 里执行：这里的变量（包括同名变量）不会带进 wg-easy 的环境。
+# 教训：脚本曾用 HOST 存域名，覆盖了 wg-easy 的 HOST=0.0.0.0，导致 Web UI 监听到公网 IP 上失败（502）。
+(
 ENABLE="${WG_HAIRPIN:-true}"
 DEV="${WG_HAIRPIN_DEV:-wg0}"
 # 客户端访问的目的端口，空格分隔
 DPORTS="${WG_HAIRPIN_DPORTS:-51821}"
-HOST="${WG_HAIRPIN_HOST:-}"
+HP_HOST="${WG_HAIRPIN_HOST:-}"
 DST4="${WG_HAIRPIN_DST4:-}"
 DST6="${WG_HAIRPIN_DST6:-}"
 # Caddy 在内部网络的地址和端口（与 docker-compose-dirty.yml 中 caddy 的 ipv4_address / ipv6_address 一致）
@@ -85,12 +88,12 @@ targets() {
     echo "$explicit" | tr ' ' '\n' | sed '/^$/d'
     return 0
   fi
-  if [ -n "$HOST" ]; then
-    if r="$(resolve "$fam" "$HOST")"; then
+  if [ -n "$HP_HOST" ]; then
+    if r="$(resolve "$fam" "$HP_HOST")"; then
       echo "$r"
       return 0
     fi
-    log "WARN: 解析 $HOST 的 IPv$fam 地址失败" >&2
+    log "WARN: 解析 $HP_HOST 的 IPv$fam 地址失败" >&2
   fi
   return 0
 }
@@ -138,6 +141,7 @@ case "$ENABLE" in
     log "WG_HAIRPIN=$ENABLE，跳过"
     ;;
 esac
+)
 
 # 交给 wg-easy 原来的启动命令（compose 的 command）
 if [ "$#" -eq 0 ]; then
