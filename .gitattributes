@@ -1,0 +1,8 @@
+# shell 脚本始终用 LF，避免 Windows 上 core.autocrlf 把它改成 CRLF 后 bash 报 $'\r': command not found
+*.sh text eol=lf
+
+# 部署文件在 Linux 服务器上使用，固定 LF
+caddy/** text eol=lf
+crowdsec/** text eol=lf
+docker-compose-dirty.yml text eol=lf
+.env.example text eol=lf

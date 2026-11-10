@@ -1,0 +1,62 @@
+# CrowdSec 处置规则（推送通知版）。.env 中 CROWDSEC_NOTIFY 有值时使用本文件
+# 不推送版是 profiles.yaml，两份文件的 filters / decisions / duration_expr 必须保持一致，改一份要同步另一份
+# 修改后执行：docker restart wg-easy-crowdsec
+# 按顺序匹配，命中且 on_success: break 后不再往下看
+# 推送渠道配置见 crowdsec/notifications/<渠道>.yaml，名字固定为 wg_easy_notify
+#
+# 重复违规递增封禁：
+#   duration_expr 统计该 IP 过去 7 天（168h）内已有的封禁次数 N，本次封禁时长 = (N + 1) × 步长，并设上限
+#   统计不分规则：同一 IP 先因扫描被封过 2 次，再爆破 2FA，按第 3 次计算
+#   7 天与 CrowdSec 默认的告警保留时长一致，更早的记录会被清理，计数自然归零
+#   decisions 里的 duration 是兜底值：duration_expr 出错时使用
+#   注意：duration_expr 必须和 decisions 平级，写进 decisions 下面不会生效
+#   通知消息里的“封禁”时长就是递增后的实际时长
+
+# 1. 2FA 验证码爆破：能走到这一步说明密码已被猜中或泄露，通知标为高危并 @所有人
+#    24h → 48h → 72h → …，上限 168h（7 天）
+name: wg_easy_2fa_bf
+filters:
+  - Alert.Remediation == true && Alert.GetScope() == "Ip" && Alert.GetScenario() == "wg-easy/2fa-bf"
+decisions:
+  - type: ban
+    duration: 24h
+duration_expr: "Sprintf('%dh', (GetDecisionsSinceCount(Alert.GetValue(), '168h') + 1) * 24 > 168 ? 168 : (GetDecisionsSinceCount(Alert.GetValue(), '168h') + 1) * 24)"
+notifications:
+  - wg_easy_notify
+on_success: break
+---
+# 2. 其他 wg-easy 专用规则（密码爆破、凭据爆破、链接枚举、持续触发限流）：封禁并推送
+#    4h → 8h → 12h → …，上限 72h
+name: wg_easy_ip_remediation
+filters:
+  - Alert.Remediation == true && Alert.GetScope() == "Ip" && Alert.GetScenario() startsWith "wg-easy/"
+decisions:
+  - type: ban
+    duration: 4h
+duration_expr: "Sprintf('%dh', (GetDecisionsSinceCount(Alert.GetValue(), '168h') + 1) * 4 > 72 ? 72 : (GetDecisionsSinceCount(Alert.GetValue(), '168h') + 1) * 4)"
+notifications:
+  - wg_easy_notify
+on_success: break
+---
+# 3. CrowdSec 官方规则（目录扫描、漏洞探测等）：照常封禁，默认不推送
+#    公网服务器每天都会被扫描，全推送容易刷屏；想推送就取消下面两行注释
+#    4h → 8h → 12h → …，上限 72h
+name: default_ip_remediation
+filters:
+  - Alert.Remediation == true && Alert.GetScope() == "Ip"
+decisions:
+  - type: ban
+    duration: 4h
+duration_expr: "Sprintf('%dh', (GetDecisionsSinceCount(Alert.GetValue(), '168h') + 1) * 4 > 72 ? 72 : (GetDecisionsSinceCount(Alert.GetValue(), '168h') + 1) * 4)"
+# notifications:
+#   - wg_easy_notify
+on_success: break
+---
+# 4. 网段封禁：固定 4 小时，不递增
+name: default_range_remediation
+filters:
+  - Alert.Remediation == true && Alert.GetScope() == "Range"
+decisions:
+  - type: ban
+    duration: 4h
+on_success: break

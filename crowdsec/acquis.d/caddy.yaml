@@ -1,0 +1,6 @@
+# 读取 Caddy 的 JSON 访问日志（由 caddy/logs 只读挂载进来）
+# 只写当前文件名，不用通配符：Caddy 轮转后旧文件会改名，用通配符会把旧日志重新读一遍
+filenames:
+  - /var/log/caddy/access.log
+labels:
+  type: caddy

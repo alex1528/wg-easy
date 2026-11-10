@@ -1,0 +1,8 @@
+# 接收 wg-easy 容器的日志：Docker 的 syslog 日志驱动经 UDP 发到这里（见 compose 里 wg-easy 的 logging）
+# 不需要挂载 docker.sock
+# 只支持 UDP；compose 只把这个端口发布在宿主机 127.0.0.1 上，外网访问不到
+source: syslog
+listen_addr: 0.0.0.0
+listen_port: 5140
+labels:
+  type: syslog

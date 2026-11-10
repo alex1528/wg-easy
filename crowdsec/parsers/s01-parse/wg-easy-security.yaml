@@ -1,0 +1,27 @@
+# 解析 wg-easy 自己输出的安全日志（src/server/utils/securityLogger.ts）：
+#   Security failure: type=2fa ip=203.0.113.9
+#   Security failure: type=password username="admin" ip=203.0.113.9
+#   Security failure: type=one-time-link ip=2001:db8::1
+# ip 由 wg-easy 从 Caddy 传来的 X-Forwarded-For 取得（compose 里 TRUSTED_PROXIES 只信任 Caddy）
+#
+# 防伪造：username 是用户输入的，攻击者可以把用户名填成 `x ip=8.8.8.8`，
+# 企图让日志里出现别人的 IP 从而陷害封禁。wg-easy 用 JSON.stringify 输出用户名（引号、换行都会被转义），
+# 而真实 ip 永远是行尾最后一个字段，所以这里把 ip 锚定在行尾（\s*$），只认最后一个 ip=。
+# 测试：docker exec wg-easy-crowdsec cscli explain --type syslog \
+#   --log 'Nov  9 17:00:00 host wg-easy[1]: Security failure: type=2fa ip=203.0.113.9'
+filter: "evt.Parsed.program == 'wg-easy'"
+onsuccess: next_stage
+name: wg-easy/security-logs
+description: "解析 wg-easy 的认证失败日志"
+grok:
+  pattern: 'Security failure: type=%{NOTSPACE:wg_event}(?: username="(?:[^"\\]|\\.)*")? ip=%{IP:wg_ip}\s*$'
+  apply_on: message
+statics:
+  - meta: log_type
+    value: wg-easy_security
+  - meta: service
+    value: wg-easy
+  - meta: source_ip
+    expression: evt.Parsed.wg_ip
+  - meta: wg_event
+    expression: evt.Parsed.wg_event

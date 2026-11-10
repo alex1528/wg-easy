@@ -1,0 +1,9 @@
+# 占位文件：CROWDSEC_NOTIFY 留空时挂载它，让挂载路径始终存在
+# 此时使用的 profiles.yaml 不引用 wg_easy_notify，所以这份配置永远不会被调用，不会发出任何请求
+type: http
+name: wg_easy_notify
+log_level: info
+url: http://127.0.0.1/
+method: POST
+format: |
+  {{ . | toJson }}

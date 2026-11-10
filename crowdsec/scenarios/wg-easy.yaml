@@ -1,0 +1,127 @@
+# wg-easy 专用检测场景
+#   场景 1-4：基于 Caddy 访问日志（acquis.d/caddy.yaml）
+#   场景 5  ：基于 wg-easy 自己的安全日志（acquis.d/wg-easy-syslog.yaml + parsers/s01-parse/wg-easy-security.yaml）
+# 漏桶算法：同一 IP 的事件进桶，每过 leakspeed 漏掉一个；桶里超过 capacity 个就触发封禁
+# 默认封禁时长 4 小时（CrowdSec 默认 profiles.yaml）
+#
+# 说明：wg-easy 的 2FA 验证码错误返回 HTTP 200（body 里是 INVALID_TOTP_CODE），
+# Caddy 访问日志里看不出来，所以 2FA 爆破改用 wg-easy 自己打印的 "Security failure: type=2fa" 日志检测（场景 5）。
+
+# 1. 密码爆破：POST /api/auth/password 返回 401（用户名或密码错误 / 用户被禁用）
+#    Caddy 限流每分钟最多放过 5 次，桶净增约 4 个/分钟，持续爆破约 3 分钟后被封
+#    正常用户连续输错 10 次以上才会触发
+type: leaky
+name: wg-easy/password-bf
+description: "wg-easy 登录密码爆破"
+filter: |
+  evt.Meta.log_type == 'http_access-log' &&
+  evt.Meta.http_verb == 'POST' &&
+  evt.Meta.http_path startsWith '/api/auth/password' &&
+  evt.Meta.http_status == '401'
+groupby: evt.Meta.source_ip
+capacity: 10
+leakspeed: 1m
+blackhole: 5m
+labels:
+  service: wg-easy
+  behavior: "http:bruteforce"
+  label: "wg-easy 登录密码爆破"
+  classification:
+    - attack.T1110
+  confidence: 3
+  spoofable: 0
+  remediation: true
+---
+# 2. 凭据爆破：带 Authorization 头（Basic 用户名密码或 Bearer 令牌）访问 API 被拒（401）
+#    wg-easy 每个 API 都接受 Basic 认证，可绕开登录接口直接猜密码
+#    Caddy 日志会把 Authorization 的值脱敏，但头本身仍会记录，可据此区分"未登录"和"凭据错误"
+type: leaky
+name: wg-easy/credential-bf
+description: "wg-easy API 凭据爆破（Basic / Bearer）"
+filter: |
+  evt.Meta.log_type == 'http_access-log' &&
+  evt.Meta.http_path startsWith '/api/' &&
+  evt.Meta.http_status == '401' &&
+  get(evt.Unmarshaled.caddy.request.headers, 'Authorization') != nil
+groupby: evt.Meta.source_ip
+capacity: 10
+leakspeed: 1m
+blackhole: 5m
+labels:
+  service: wg-easy
+  behavior: "http:bruteforce"
+  label: "wg-easy API 凭据爆破"
+  classification:
+    - attack.T1110
+  confidence: 3
+  spoofable: 0
+  remediation: true
+---
+# 3. 一次性配置链接枚举：/cnf/* 返回 404（链接不存在或已被使用）
+#    正常用户重复点已用过的链接只会产生一两次 404
+type: leaky
+name: wg-easy/cnf-enum
+description: "wg-easy 一次性配置链接枚举"
+filter: |
+  evt.Meta.log_type == 'http_access-log' &&
+  evt.Meta.http_path startsWith '/cnf/' &&
+  evt.Meta.http_status == '404'
+groupby: evt.Meta.source_ip
+capacity: 5
+leakspeed: 1m
+blackhole: 5m
+labels:
+  service: wg-easy
+  behavior: "http:scan"
+  label: "wg-easy 配置链接枚举"
+  classification:
+    - attack.T1595
+  confidence: 3
+  spoofable: 0
+  remediation: true
+---
+# 4. 持续撞限流：反复收到 Caddy 返回的 429，说明在高频刷接口
+#    正常 UI 每秒轮询一次，远低于 600 次/分钟的限额，不会收到 429
+type: leaky
+name: wg-easy/rate-limit-abuse
+description: "wg-easy 持续触发限流"
+filter: |
+  evt.Meta.log_type == 'http_access-log' &&
+  evt.Meta.http_status == '429'
+groupby: evt.Meta.source_ip
+capacity: 20
+leakspeed: 30s
+blackhole: 5m
+labels:
+  service: wg-easy
+  behavior: "http:dos"
+  label: "wg-easy 持续触发限流"
+  classification:
+    - attack.T1498
+  confidence: 2
+  spoofable: 0
+  remediation: true
+---
+# 5. 2FA 验证码爆破：wg-easy 日志 "Security failure: type=2fa"（验证码错误）
+#    能走到 2FA 这一步说明密码已经输对了，这是高危信号，所以门槛比密码爆破低：
+#    6 次错误（每 2 分钟消减 1 次）即封。Caddy 限流每分钟最多放过 5 次，约 1~2 分钟内被封；
+#    正常用户偶尔输错一两次不会触发
+type: leaky
+name: wg-easy/2fa-bf
+description: "wg-easy 2FA 验证码爆破（密码可能已泄露）"
+filter: |
+  evt.Meta.log_type == 'wg-easy_security' &&
+  evt.Meta.wg_event == '2fa'
+groupby: evt.Meta.source_ip
+capacity: 5
+leakspeed: 2m
+blackhole: 5m
+labels:
+  service: wg-easy
+  behavior: "http:bruteforce"
+  label: "wg-easy 2FA 验证码爆破"
+  classification:
+    - attack.T1110
+  confidence: 3
+  spoofable: 0
+  remediation: true

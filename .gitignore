@@ -4,3 +4,10 @@ node_modules
 
 docs/site
 docs/.cache
+
+# 部署产生的数据和密钥，禁止提交
+.env
+/data/
+/caddy/data/
+/caddy/config/
+/caddy/logs/

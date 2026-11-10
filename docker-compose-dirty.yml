@@ -1,0 +1,176 @@
+services:
+  wg-easy:
+    image: ccr.ccs.tencentyun.com/vpn-server/wg-easy:latest
+    container_name: wg-easy
+    environment:
+      # Web UI 仍在容器内部监听 51821（纯 HTTP），只给 caddy 访问，不再直接对外发布
+      - PORT=51821
+      - HOST=0.0.0.0
+      # 浏览器侧经 caddy 走 HTTPS，保持 false（安全 Cookie 生效）
+      - INSECURE=false
+      # 只信任 caddy 转发的 X-Forwarded-Host / X-Forwarded-For
+      - TRUSTED_PROXIES=10.42.42.43,fdcc:ad94:bacf:61a3::2b
+    networks:
+      wg:
+        ipv4_address: 10.42.42.42
+        ipv6_address: fdcc:ad94:bacf:61a3::2a
+    volumes:
+      - ./data:/etc/wireguard
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - "51820:51820/udp"
+      # 51821/tcp 改由下面的 caddy 以 HTTPS 对外提供
+    restart: unless-stopped
+    # 日志经 Docker 的 syslog 驱动发给 CrowdSec，用于检测 2FA 爆破等（不需要挂载 docker.sock）
+    # 故意不写 depends_on crowdsec：CrowdSec 出问题（如镜像拉不下来）时 VPN 照常启动
+    # Docker 20.10+ 默认开启双写缓存，docker logs wg-easy 照常可用
+    logging:
+      driver: syslog
+      options:
+        # 由宿主机上的 Docker 守护进程发送，所以用宿主机回环地址（对应 crowdsec 的 127.0.0.1:5140 端口发布）
+        syslog-address: "udp://127.0.0.1:5140"
+        syslog-format: rfc5424
+        # 解析器按程序名 wg-easy 过滤，不要改
+        tag: wg-easy
+        # CrowdSec 没启动或重启时日志直接丢弃，不会卡住 wg-easy
+        mode: non-blocking
+        max-buffer-size: 4m
+    security_opt:
+      - seccomp:unconfined
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+      # - NET_RAW # ⚠️ Uncomment if using Podman
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv6.conf.default.forwarding=1
+
+  caddy:
+    # 官方镜像不含限流和 DNS 插件，本地用 xcaddy 编译（见 caddy/Dockerfile）
+    # 推荐：在构建机运行 scripts/caddy-image.sh 推到 CCR，服务器 .env 设置 CADDY_IMAGE 后
+    #   docker compose -f docker-compose-dirty.yml pull caddy && docker compose -f docker-compose-dirty.yml up -d --no-build
+    # 未设置 CADDY_IMAGE 时使用本地标签，镜像不存在则按下面的 build 现场编译
+    build:
+      context: ./caddy
+      args:
+        CADDY_VERSION: ${CADDY_VERSION:-2}
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    image: ${CADDY_IMAGE:-wg-easy-caddy:ratelimit-dns}
+    container_name: wg-easy-caddy
+    depends_on:
+      - wg-easy
+      - crowdsec
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    environment:
+      # 浏览器访问用的公网 IP 或域名（必填，见 .env）
+      - WG_WEB_HOST=${WG_WEB_HOST:?请在 .env 中设置 WG_WEB_HOST（公网 IP 或域名）}
+      # 证书模式：internal | http | tencentcloud | alidns
+      - CADDY_TLS_MODE=${CADDY_TLS_MODE:-internal}
+      - ACME_EMAIL=${ACME_EMAIL:-}
+      - CADDY_DNS_RESOLVERS=${CADDY_DNS_RESOLVERS:-119.29.29.29 223.5.5.5}
+      # DNS 验证密钥：只填所选服务商的那一组，另一组留空
+      - TENCENTCLOUD_SECRET_ID=${TENCENTCLOUD_SECRET_ID:-}
+      - TENCENTCLOUD_SECRET_KEY=${TENCENTCLOUD_SECRET_KEY:-}
+      - ALIYUN_ACCESS_KEY_ID=${ALIYUN_ACCESS_KEY_ID:-}
+      - ALIYUN_ACCESS_KEY_SECRET=${ALIYUN_ACCESS_KEY_SECRET:-}
+      - WG_ALLOW_IPS=${WG_ALLOW_IPS:-0.0.0.0/0 ::/0}
+      - CADDY_HSTS=${CADDY_HSTS:-max-age=0}
+      - RL_LOGIN_PER_MIN=${RL_LOGIN_PER_MIN:-5}
+      - RL_LOGIN_PER_HOUR=${RL_LOGIN_PER_HOUR:-30}
+      # 与下面 crowdsec 服务的 BOUNCER_KEY_caddy 是同一个值
+      - CROWDSEC_BOUNCER_KEY=${CROWDSEC_BOUNCER_KEY:?请在 .env 中设置 CROWDSEC_BOUNCER_KEY（openssl rand -hex 32 生成）}
+      - CROWDSEC_LAPI_URL=http://crowdsec:8080
+    ports:
+      - "51821:51821/tcp"
+      # 仅 http 模式需要（HTTP-01 验证 + 续期）；internal / tencentcloud / alidns 模式可删掉这一行
+      - "80:80/tcp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # 证书、私钥、内部 CA 持久化在这里，删掉会导致重新签发
+      - ./caddy/data:/data
+      - ./caddy/config:/config
+      # 访问日志，供 CrowdSec 分析
+      - ./caddy/logs:/var/log/caddy
+    networks:
+      wg:
+        ipv4_address: 10.42.42.43
+        ipv6_address: fdcc:ad94:bacf:61a3::2b
+
+  crowdsec:
+    # 国内拉取慢可在 .env 设置 CROWDSEC_IMAGE 换成自己的镜像仓库地址
+    image: ${CROWDSEC_IMAGE:-crowdsecurity/crowdsec:latest}
+    container_name: wg-easy-crowdsec
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - TZ=Asia/Shanghai
+      # 首次启动自动从 CrowdSec Hub 安装：caddy 解析器 + 通用 HTTP 攻击场景 + CVE 探测；
+      # linux 集合含内网 IP 白名单（crowdsecurity/whitelists）
+      - COLLECTIONS=crowdsecurity/linux crowdsecurity/caddy
+      # 启动时自动注册名为 caddy 的 bouncer，密钥与 caddy 服务一致；无需手动 cscli bouncers add
+      - BOUNCER_KEY_caddy=${CROWDSEC_BOUNCER_KEY:?请在 .env 中设置 CROWDSEC_BOUNCER_KEY（openssl rand -hex 32 生成）}
+      # true = 不连 CrowdSec 中央 API（不上报、不接收社区黑名单），纯本地运行
+      - DISABLE_ONLINE_API=${CROWDSEC_DISABLE_ONLINE_API:-false}
+      # 可选：在 app.crowdsec.net 获取，填入后实例会出现在网页控制台
+      - ENROLL_KEY=${CROWDSEC_ENROLL_KEY:-}
+      - ENROLL_INSTANCE_NAME=wg-easy
+      # 封禁通知（CROWDSEC_NOTIFY 选渠道，见 crowdsec/notifications/）
+      # 消息标题里显示的服务器名
+      - NOTIFY_SERVER_NAME=${WG_WEB_HOST:-wg-easy}
+      # 只填所选渠道的那一项，其余留空
+      - NOTIFY_WECOM_KEY=${NOTIFY_WECOM_KEY:-}
+      - NOTIFY_DINGTALK_TOKEN=${NOTIFY_DINGTALK_TOKEN:-}
+      - NOTIFY_TELEGRAM_TOKEN=${NOTIFY_TELEGRAM_TOKEN:-}
+      - NOTIFY_TELEGRAM_CHAT_ID=${NOTIFY_TELEGRAM_CHAT_ID:-}
+    volumes:
+      # 配置与数据库用命名卷：首次启动由镜像自动填充默认配置
+      - crowdsec_config:/etc/crowdsec
+      - crowdsec_data:/var/lib/crowdsec/data
+      # 本项目的采集配置、检测场景、白名单（只读覆盖到配置卷里）
+      - ./crowdsec/acquis.d:/etc/crowdsec/acquis.d:ro
+      - ./crowdsec/scenarios/wg-easy.yaml:/etc/crowdsec/scenarios/wg-easy.yaml:ro
+      - ./crowdsec/parsers/s02-enrich/wg-easy-whitelist.yaml:/etc/crowdsec/parsers/s02-enrich/wg-easy-whitelist.yaml:ro
+      - ./crowdsec/parsers/s01-parse/wg-easy-security.yaml:/etc/crowdsec/parsers/s01-parse/wg-easy-security.yaml:ro
+      # 处置规则：CROWDSEC_NOTIFY 留空用 profiles.yaml（不推送），有值用 profiles-notify.yaml
+      - ./crowdsec/profiles${CROWDSEC_NOTIFY:+-notify}.yaml:/etc/crowdsec/profiles.yaml:ro
+      # 推送渠道：wecom | dingtalk | telegram；留空挂载占位文件 off.yaml
+      # 值写错时 docker 会把不存在的路径当目录创建，cscli notifications list 里将看不到 wg_easy_notify
+      - ./crowdsec/notifications/${CROWDSEC_NOTIFY:-off}.yaml:/etc/crowdsec/notifications/wg-easy.yaml:ro
+      - ./caddy/logs:/var/log/caddy:ro
+    ports:
+      # 只绑定宿主机回环：供 Docker 守护进程把 wg-easy 日志以 syslog 发进来，外网访问不到
+      - "127.0.0.1:5140:5140/udp"
+    # 本地 API(8080) 不对外发布，只在 wg 网络内供 caddy 访问
+    networks:
+      wg:
+        ipv4_address: 10.42.42.44
+        ipv6_address: fdcc:ad94:bacf:61a3::2c
+
+volumes:
+  crowdsec_config:
+  crowdsec_data:
+
+networks:
+  wg:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.42.42.0/24
+        - subnet: fdcc:ad94:bacf:61a3::/64

@@ -1,0 +1,196 @@
+{
+	# 客户端用 IP 访问时不带 SNI，默认按 WG_WEB_HOST 选证书
+	default_sni {$WG_WEB_HOST}
+
+	# 容器内无法也无需把内部 CA 装进系统信任库
+	skip_install_trust
+
+	# CrowdSec 本地 API：每 15 秒拉取一次封禁决策，缓存在内存里逐请求比对
+	# CrowdSec 暂时不可用时 Caddy 照常启动（未开 enable_hard_fails），已拉到的决策继续生效
+	crowdsec {
+		api_url {$CROWDSEC_LAPI_URL:http://crowdsec:8080}
+		api_key {$CROWDSEC_BOUNCER_KEY}
+		ticker_interval 15s
+	}
+
+	# 同一端口 51821 上：明文 HTTP 请求自动 308 跳转到 https://同主机:51821
+	# 注意：站点地址不要加 bind，否则监听地址变成 0.0.0.0:51821，此处 :51821 匹配不上
+	servers :51821 {
+		listener_wrappers {
+			http_redirect
+			tls
+		}
+		# 只开 h1/h2：compose 未发布 51821/udp，开 h3 会让浏览器白白尝试 QUIC
+		protocols h1 h2
+	}
+}
+
+# ---------- 证书模式（由 .env 的 CADDY_TLS_MODE 选择，见站点块里的 import）----------
+# 模式名写错会直接启动失败（找不到对应 snippet），不会悄悄退回其他模式
+
+# internal：Caddy 内置 CA 自动签发并续期（IP / 内网可用，客户端需导入根证书）
+(tls_internal) {
+	tls internal
+}
+
+# http：Let's Encrypt / ZeroSSL，HTTP-01 验证（需要域名，且宿主机 80/tcp 公网可达）
+# 块里的 protocols 就是默认值，作用是保证 ACME_EMAIL 为空时语法仍然合法
+(tls_http) {
+	tls {$ACME_EMAIL} {
+		protocols tls1.2
+	}
+}
+
+# tencentcloud：DNS-01 验证，经腾讯云 API 写 _acme-challenge TXT 记录（不需要 80 端口）
+(tls_tencentcloud) {
+	tls {$ACME_EMAIL} {
+		dns tencentcloud {
+			secret_id {env.TENCENTCLOUD_SECRET_ID}
+			secret_key {env.TENCENTCLOUD_SECRET_KEY}
+		}
+		# 检查 TXT 记录是否生效时用的 DNS（国内默认用 DNSPod + 阿里公共 DNS）
+		resolvers {$CADDY_DNS_RESOLVERS:119.29.29.29 223.5.5.5}
+	}
+}
+
+# alidns：DNS-01 验证，经阿里云 API 写 TXT 记录（不需要 80 端口）
+(tls_alidns) {
+	tls {$ACME_EMAIL} {
+		dns alidns {
+			access_key_id {env.ALIYUN_ACCESS_KEY_ID}
+			access_key_secret {env.ALIYUN_ACCESS_KEY_SECRET}
+		}
+		resolvers {$CADDY_DNS_RESOLVERS:119.29.29.29 223.5.5.5}
+	}
+}
+
+# ---------- 安全响应头 ----------
+(security_headers) {
+	header {
+		# IP 访问时浏览器会忽略 HSTS；internal 证书未导入根证书前别开长 max-age，
+		# 否则证书告警页将无法“继续访问”。正式证书稳定后在 .env 设 CADDY_HSTS=max-age=31536000
+		Strict-Transport-Security "{$CADDY_HSTS:max-age=0}"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		# 只放不影响 Nuxt 内联脚本的指令（禁止被嵌入 iframe、禁插件、锁定 base）
+		Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+		-Server
+		-X-Powered-By
+		defer
+	}
+
+	# 接口和一次性配置链接（含客户端私钥）禁止任何缓存
+	@nocache path /api/* /cnf/*
+	header @nocache Cache-Control "no-store"
+}
+
+{$WG_WEB_HOST}:51821 {
+	# internal | http | tencentcloud | alidns，见上方 tls_* snippet
+	# Caddy 默认最低 TLS 1.2、仅现代加密套件，无需额外配置
+	import tls_{$CADDY_TLS_MODE:internal}
+
+	# JSON 访问日志写文件，CrowdSec 容器只读挂载同一目录进行分析
+	# 查看：tail -f caddy/logs/access.log
+	# 不要改 format 和字段：CrowdSec 的 caddy-logs 解析器依赖默认 JSON 字段
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 50MiB
+			roll_keep 5
+			roll_keep_for 168h
+		}
+		format json
+	}
+
+	import security_headers
+
+	request_body {
+		max_size 10MB
+	}
+
+	# route 内严格按书写顺序执行：CrowdSec 封禁 -> 白名单 -> 指标保护 -> 限流 -> 压缩 -> 转发
+	route {
+		# ---------- 0. CrowdSec：已被封禁的 IP 直接返回 403（对 /cnf/* 同样生效）----------
+		crowdsec
+
+		# ---------- 1. 来源 IP 白名单 ----------
+		# WG_ALLOW_IPS 为空格分隔的 IP/CIDR；默认 0.0.0.0/0 ::/0（不限制）
+		# /cnf/* 是发给终端用户的一次性配置链接，不受白名单限制（仍受限流约束）
+		@blocked {
+			not remote_ip {$WG_ALLOW_IPS:0.0.0.0/0 ::/0}
+			not path /cnf/*
+		}
+		abort @blocked
+
+		# ---------- 2. Prometheus 指标仅内网可访问 ----------
+		@metrics_public {
+			path /metrics/*
+			not remote_ip private_ranges
+		}
+		abort @metrics_public
+
+		# ---------- 3. 限流（按客户端 IP，IPv6 按 /64 合并计数，超限返回 429）----------
+		rate_limit {
+			# 登录 / 2FA：短窗口防爆破
+			zone auth_login_min {
+				match {
+					method POST
+					path /api/auth/password /api/auth/verify-2fa
+				}
+				key {remote_host}
+				events {$RL_LOGIN_PER_MIN:5}
+				window 1m
+				ipv6_prefix 64
+			}
+			# 登录 / 2FA：长窗口防慢速爆破
+			zone auth_login_hour {
+				match {
+					method POST
+					path /api/auth/password /api/auth/verify-2fa
+				}
+				key {remote_host}
+				events {$RL_LOGIN_PER_HOUR:30}
+				window 1h
+				ipv6_prefix 64
+			}
+			# wg-easy 所有 API 都接受 HTTP Basic 认证，同样是爆破入口
+			zone auth_basic {
+				match {
+					header Authorization "Basic *"
+				}
+				key {remote_host}
+				events 30
+				window 1m
+				ipv6_prefix 64
+			}
+			# 一次性配置链接：防枚举
+			zone cnf {
+				match {
+					path /cnf/*
+				}
+				key {remote_host}
+				events 10
+				window 1m
+				ipv6_prefix 64
+			}
+			# 普通 API：UI 每秒轮询一次，600/分钟留足余量
+			zone api {
+				match {
+					path /api/*
+				}
+				key {remote_host}
+				events 600
+				window 1m
+				ipv6_prefix 64
+			}
+			jitter 0.2
+			log_key
+		}
+
+		encode zstd gzip
+
+		# ---------- 4. 转发到 wg-easy 容器内部的纯 HTTP 端口 ----------
+		reverse_proxy wg-easy:51821
+	}
+}

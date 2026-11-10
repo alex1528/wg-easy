@@ -1,0 +1,34 @@
+# Telegram 机器人。.env：CROWDSEC_NOTIFY=telegram，NOTIFY_TELEGRAM_TOKEN=<@BotFather 给的 token>，NOTIFY_TELEGRAM_CHAT_ID=<接收消息的 chat id>
+# chat id：先给机器人发一条消息，再打开 https://api.telegram.org/bot<token>/getUpdates 查看 chat.id
+# 国内服务器通常连不上 api.telegram.org
+type: http
+name: wg_easy_notify
+log_level: info
+# 30 秒内的告警合并成一条消息
+group_wait: 30s
+max_retry: 3
+timeout: 10s
+url: https://api.telegram.org/bot${NOTIFY_TELEGRAM_TOKEN}/sendMessage
+method: POST
+headers:
+  Content-Type: application/json
+format: |
+  {{- $server := env "NOTIFY_SERVER_NAME" | default "wg-easy" -}}
+  {{- $max := 8 -}}
+  {{- $high := false -}}
+  {{- $body := "" -}}
+  {{- range $i, $a := . -}}
+    {{- $sc := $a.GetScenario -}}
+    {{- $is2fa := eq $sc "wg-easy/2fa-bf" -}}
+    {{- if $is2fa }}{{ $high = true }}{{ end -}}
+    {{- if lt $i $max -}}
+      {{- $dur := "" -}}
+      {{- range $a.Decisions }}{{ $dur = toJson .Duration | trimAll "\"" }}{{ end -}}
+      {{- $where := list $a.Source.Cn $a.Source.AsName | compact | join " / " | default "未知" -}}
+      {{- $body = printf "%s\n\n%s %s\nIP：%s（%s）\n规则：%s\n次数：%s，封禁：%s" $body (ternary "🚨" "⛔" $is2fa) (ternary "2FA 验证码爆破" "触发检测规则" $is2fa) $a.GetValue $where $sc (toJson $a.EventsCount) ($dur | default "-") -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if gt (len .) $max }}{{ $body = printf "%s\n\n……另有 %d 条，执行 cscli alerts list 查看" $body (sub (len .) $max) }}{{ end -}}
+  {{- $title := printf "【wg-easy 封禁】%s  %s" $server (now | date "2006-01-02 15:04:05") -}}
+  {{- if $high }}{{ $title = printf "%s\n🚨 高危：有 IP 在爆破 2FA，说明密码已被猜中或泄露，请立即修改该账号密码" $title }}{{ end -}}
+  {{- dict "chat_id" (env "NOTIFY_TELEGRAM_CHAT_ID") "text" (printf "%s%s" $title $body) "disable_web_page_preview" true | toJson -}}
