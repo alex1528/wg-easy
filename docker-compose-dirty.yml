@@ -83,8 +83,11 @@ services:
     environment:
       # 浏览器访问用的公网 IP 或域名（必填，见 .env）
       - WG_WEB_HOST=${WG_WEB_HOST:?请在 .env 中设置 WG_WEB_HOST（公网 IP 或域名）}
-      # 证书模式：internal | http | tencentcloud | alidns
+      # 证书模式：internal | http | tencentcloud | alidns | file
       - CADDY_TLS_MODE=${CADDY_TLS_MODE:-internal}
+      # file 模式用的证书和私钥文件名（在 caddy/certs/ 下）
+      - CADDY_TLS_CERT_FILE=${CADDY_TLS_CERT_FILE:-cert.pem}
+      - CADDY_TLS_KEY_FILE=${CADDY_TLS_KEY_FILE:-key.pem}
       - ACME_EMAIL=${ACME_EMAIL:-}
       - CADDY_DNS_RESOLVERS=${CADDY_DNS_RESOLVERS:-119.29.29.29 223.5.5.5}
       # DNS 验证密钥：只填所选服务商的那一组，另一组留空
@@ -101,13 +104,15 @@ services:
       - CROWDSEC_LAPI_URL=http://crowdsec:8080
     ports:
       - "51821:51821/tcp"
-      # 仅 http 模式需要（HTTP-01 验证 + 续期）；internal / tencentcloud / alidns 模式可删掉这一行
+      # 仅 http 模式需要（HTTP-01 验证 + 续期）；internal / tencentcloud / alidns / file 模式可删掉这一行
       - "80:80/tcp"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       # 证书、私钥、内部 CA 持久化在这里，删掉会导致重新签发
       - ./caddy/data:/data
       - ./caddy/config:/config
+      # 已有证书（CADDY_TLS_MODE=file 时使用），只读
+      - ./caddy/certs:/etc/caddy/certs:ro
       # 访问日志，供 CrowdSec 分析
       - ./caddy/logs:/var/log/caddy
     networks:

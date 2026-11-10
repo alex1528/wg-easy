@@ -95,12 +95,20 @@ for m in $REQUIRED_MODULES; do
   echo "    ✔ $m"
 done
 
-# ---------- 3. 自检：Caddyfile 在 4 种证书模式下都能通过校验 ----------
+# ---------- 3. 自检：Caddyfile 在 5 种证书模式下都能通过校验 ----------
+# file 模式要加载真实的证书文件，构建时没有，只检查语法（caddy adapt）
 # 用 stdin 把 Caddyfile 传进容器，避免 Windows 下挂载路径的问题
 # 只检查语法和模块配置，不会真去申请证书，也不验证云 API 密钥是否正确
 # CrowdSec 用占位密钥和本机地址，校验时不需要 CrowdSec 在运行
 echo "==> [3/4] 校验 caddy/Caddyfile"
-for mode in internal http tencentcloud alidns; do
+for mode in internal http tencentcloud alidns file; do
+  if [ "$mode" = file ]; then
+    check='cat > /tmp/Caddyfile && caddy adapt --adapter caddyfile --config /tmp/Caddyfile >/dev/null'
+    note="（仅语法）"
+  else
+    check='cat > /tmp/Caddyfile && caddy validate --adapter caddyfile --config /tmp/Caddyfile'
+    note=""
+  fi
   if out="$(docker run --rm -i \
         -e WG_WEB_HOST=vpn.example.com \
         -e CADDY_TLS_MODE="$mode" \
@@ -108,9 +116,9 @@ for mode in internal http tencentcloud alidns; do
         -e CROWDSEC_BOUNCER_KEY=validateonly \
         -e CROWDSEC_LAPI_URL=http://127.0.0.1:8080 \
         "$BUILD_TAG" \
-        sh -c 'cat > /tmp/Caddyfile && caddy validate --adapter caddyfile --config /tmp/Caddyfile' \
+        sh -c "$check" \
         < caddy/Caddyfile 2>&1)"; then
-    echo "    ✔ $mode"
+    echo "    ✔ $mode$note"
   else
     echo "$out" | tail -n 20 >&2
     die "Caddyfile 在 $mode 模式下校验失败，已停止（未推送）"

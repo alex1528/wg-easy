@@ -11,3 +11,6 @@ docs/.cache
 /caddy/data/
 /caddy/config/
 /caddy/logs/
+# 已有证书和私钥，只提交说明文件
+/caddy/certs/*
+!/caddy/certs/README.md

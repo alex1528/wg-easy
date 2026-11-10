@@ -106,6 +106,7 @@ sed -i "s/^CROWDSEC_BOUNCER_KEY=.*/CROWDSEC_BOUNCER_KEY=$(openssl rand -hex 32)/
 | `http`             | Let's Encrypt，HTTP 验证   | `ACME_EMAIL`；`WG_WEB_HOST` 是解析到本机的域名              | 需要    |
 | `tencentcloud`     | Let's Encrypt，DNS 验证    | `ACME_EMAIL`、`TENCENTCLOUD_SECRET_ID`、`TENCENTCLOUD_SECRET_KEY` | 不需要  |
 | `alidns`           | Let's Encrypt，DNS 验证    | `ACME_EMAIL`、`ALIYUN_ACCESS_KEY_ID`、`ALIYUN_ACCESS_KEY_SECRET`  | 不需要  |
+| `file`             | 已有证书（购买或自行申请）           | 证书和私钥放到 `caddy/certs/`，见下文“使用已有证书”                              | 不需要  |
 
 - 只有 IP、没有域名时用 `internal`。浏览器会提示证书不受信任，导入根证书后提示消失（见下文“导入根证书”一节）。
 - 国内服务器上未备案的域名可能被封 80 端口，HTTP 验证会失败，这时用 DNS 验证。
@@ -139,6 +140,47 @@ TENCENTCLOUD_SECRET_KEY=xxxxxxxxxxxxxxxx
 | `CADDY_IMAGE`                 | 空                                                      | 服务器直接拉取的 Caddy 镜像；留空则使用本地镜像或现场编译                    |
 | `CADDY_IMAGE_REPO`            | `ccr.ccs.tencentyun.com/vpn-server/caddy-ratelimit-dns` | `scripts/caddy-image.sh` 的推送目标                                          |
 | `CADDY_VERSION`               | `2`                                                     | 插件与最新 Caddy 不兼容导致编译失败时，固定到较早的小版本，如 `2.9`          |
+
+### 使用已有证书
+
+已经有这个域名（或通配符域名）的证书时，用 `file` 模式。Caddy 直接加载证书，不再访问 Let's Encrypt，也不需要开放 80 端口。
+
+1. 把证书和私钥放到 `caddy/certs/`。证书必须是 PEM 格式的完整证书链（服务器证书在前，中间证书在后），私钥不能有密码。
+    - 腾讯云 SSL 证书：下载 Nginx 格式，用 `<域名>_bundle.crt` 和 `<域名>.key`
+    - 阿里云 SSL 证书：下载 Nginx 格式，用 `<名称>.pem` 和 `<名称>.key`
+2. 设置权限。Caddy 容器去掉了所有特权，只能读取属主是 root 的文件：
+
+    ```shell
+    sudo chown root:root caddy/certs/*
+    sudo chmod 644 caddy/certs/<证书文件>
+    sudo chmod 600 caddy/certs/<私钥文件>
+    ```
+
+3. 检查证书的域名、到期时间，以及证书和私钥是否配对（后两条命令的输出应完全相同）：
+
+    ```shell
+    openssl x509 -in caddy/certs/<证书文件> -noout -subject -enddate -ext subjectAltName
+    openssl x509 -in caddy/certs/<证书文件> -noout -pubkey | openssl sha256
+    openssl pkey -in caddy/certs/<私钥文件> -pubout | openssl sha256
+    ```
+
+4. 修改 `.env`，文件名按实际填写：
+
+    ```ini
+    CADDY_TLS_MODE=file
+    CADDY_TLS_CERT_FILE=vrh.verycloud.cn_bundle.crt
+    CADDY_TLS_KEY_FILE=vrh.verycloud.cn.key
+    ```
+
+5. 重建 Caddy：`docker compose -f docker-compose-dirty.yml up -d caddy`。日志里不应再出现 `obtaining certificate`。
+
+`caddy/certs/` 下除说明文件外都被 `.gitignore` 和 `caddy/.dockerignore` 忽略，私钥不会被提交，也不会进入镜像。
+
+/// warning | 不会自动续期
+
+`file` 模式的证书到期前要手动更换：把新证书覆盖到 `caddy/certs/`，然后执行 `docker restart wg-easy-caddy`。
+
+///
 
 ## 第 2 步：准备 Caddy 镜像
 
@@ -473,6 +515,9 @@ docker compose -f docker-compose-dirty.yml up -d --force-recreate crowdsec caddy
 | 收不到封禁通知                                               | 先看“封禁通知 → 验证”；再看 `docker logs wg-easy-crowdsec` 中 `http-plugin` 的报错。国内服务器通常连不上 Telegram                          |
 | 拉取镜像报 `TLS handshake timeout`，地址是 `registry-1.docker.io` | 服务器连不上 Docker Hub，见“前置条件 → 服务器连不上 Docker Hub” |
 | 登录页提示“无法通过不安全连接登录。请使用 HTTPS。” | 浏览器地址是 `http://`，而且页面是 wg-easy 直接返回的，没有经过 Caddy：通常是旧的 wg-easy 容器还在占用宿主机 51821（`docker ps` 能看到 `0.0.0.0:51821->51821/tcp` 映射在 wg-easy 上），或者 Caddy 没有运行。确认 Caddy 镜像可用后，执行 `docker compose -f docker-compose-dirty.yml up -d --force-recreate --remove-orphans` |
+| `http` 模式日志报 `Timeout during connect (likely firewall problem)` 或 `Cannot negotiate ALPN protocol` | 80 或 443 端口从公网访问不到，或被其他服务占用。改用 DNS 验证，或用已有证书（`file` 模式） |
+| `file` 模式启动报 `loading certificates` / `no such file` / `permission denied` | 文件名与 `CADDY_TLS_CERT_FILE`、`CADDY_TLS_KEY_FILE` 不一致，或文件属主不是 root。按“使用已有证书”第 2 步设置权限 |
+| 浏览器提示证书不受信任，但证书是购买的 | 证书文件缺少中间证书。使用证书厂商提供的 bundle / fullchain 文件 |
 
 ## 已知限制
 

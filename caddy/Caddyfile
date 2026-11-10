@@ -64,6 +64,15 @@
 	}
 }
 
+# file：使用已申请好或购买的证书，不走 ACME，不需要 80 端口，也不会自动续期
+#   证书和私钥放在宿主机 caddy/certs/ 下，只读挂载到容器 /etc/caddy/certs/
+#   文件名由 .env 的 CADDY_TLS_CERT_FILE、CADDY_TLS_KEY_FILE 指定，默认 cert.pem、key.pem
+#   证书文件必须是完整证书链（服务器证书在前，中间证书在后），否则部分客户端会报证书不受信任
+#   换证书后执行：docker restart wg-easy-caddy
+(tls_file) {
+	tls /etc/caddy/certs/{$CADDY_TLS_CERT_FILE:cert.pem} /etc/caddy/certs/{$CADDY_TLS_KEY_FILE:key.pem}
+}
+
 # ---------- 安全响应头 ----------
 (security_headers) {
 	header {
@@ -87,7 +96,7 @@
 }
 
 {$WG_WEB_HOST}:51821 {
-	# internal | http | tencentcloud | alidns，见上方 tls_* snippet
+	# internal | http | tencentcloud | alidns | file，见上方 tls_* snippet
 	# Caddy 默认最低 TLS 1.2、仅现代加密套件，无需额外配置
 	import tls_{$CADDY_TLS_MODE:internal}
 
