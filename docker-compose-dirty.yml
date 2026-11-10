@@ -17,6 +17,8 @@ services:
       # VPN 客户端在隧道内访问 Web UI（如“立即同步配置”）时直接在容器内转给 Caddy，不绕公网，见 deploy/wg-easy-hairpin.sh
       - WG_HAIRPIN=${WG_HAIRPIN:-true}
       - WG_HAIRPIN_DPORTS=${WG_HAIRPIN_DPORTS:-51821}
+      # 只转发访问本机公网 IP 的流量：DST4/DST6 留空时启动时解析这个域名；多台服务器时不能不限目的地址
+      - WG_HAIRPIN_HOST=${WG_WEB_HOST:-}
       - WG_HAIRPIN_DST4=${WG_HAIRPIN_DST4:-}
       - WG_HAIRPIN_DST6=${WG_HAIRPIN_DST6:-}
       - WG_HAIRPIN_CADDY_IPV4=10.42.42.43

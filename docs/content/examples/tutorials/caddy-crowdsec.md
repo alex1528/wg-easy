@@ -240,7 +240,13 @@ VPN 客户端连上隧道后再访问 `https://<WG_WEB_HOST>:51821`（例如客�
 - 从 `wg0` 进来、目的端口是 `51821` 的 TCP，直接 DNAT 到 Caddy（`10.42.42.43:51821`），不再出公网。域名、证书和 URL 都不变
 - 进出 `wg0` 的 TCP 做 MSS 钳制，避免 TLS 证书链这类大包在隧道里被丢
 
-默认开启（`WG_HAIRPIN=true`），不限目的地址。只想拦截访问服务器公网 IP 的流量时，在 `.env` 中设置 `WG_HAIRPIN_DST4`（IPv6 用 `WG_HAIRPIN_DST6`）。规则添加失败只打印警告，不会影响 VPN 启动。
+默认开启（`WG_HAIRPIN=true`），只转发目的地址是本机公网 IP 的流量。本机地址在容器启动时解析 `WG_WEB_HOST` 得到；解析不对或用 IP 访问时，在 `.env` 中用 `WG_HAIRPIN_DST4`（IPv6 用 `WG_HAIRPIN_DST6`）直接填写。域名改了解析后，要重启 wg-easy 容器。规则添加失败只打印警告，不会影响 VPN 启动。
+
+/// warning | 多台服务器
+
+同一份配置部署多台服务器（如 `vpn1`、`vpn2`）时，不能把 `WG_HAIRPIN_DST4` 设为 `any`。否则连着 vpn1 的隧道去同步 vpn2 的配置，请求会被 vpn1 的 Caddy 截走，客户端提示“服务端响应无效：不是有效的 JSON”。
+
+///
 
 验证（客户端先连上隧道，再点一次同步配置）：
 
@@ -539,6 +545,7 @@ docker compose -f docker-compose-dirty.yml up -d --force-recreate crowdsec caddy
 | `file` 模式启动报 `loading certificates` / `no such file` / `permission denied` | 文件名与 `CADDY_TLS_CERT_FILE`、`CADDY_TLS_KEY_FILE` 不一致，或文件属主不是 root。按“使用已有证书”第 2 步设置权限 |
 | 浏览器提示证书不受信任，但证书是购买的 | 证书文件缺少中间证书。使用证书厂商提供的 bundle / fullchain 文件 |
 | VPN 隧道连上后，访问 Web UI 或 OIDC 回调超时，访问其他网站正常 | 流量绕公网回到服务器自己被拦住。确认 `WG_HAIRPIN=true`，并按“隧道内访问 Web UI”检查规则计数 |
+| 多台服务器时，连着一台的隧道同步另一台的配置，提示“不是有效的 JSON” | 隧道内的转发规则没有限定目的地址，请求被当前隧道所在服务器的 Caddy 截走。更新 `deploy/wg-easy-hairpin.sh` 后重建 wg-easy，确认日志里“本机地址”只有本机公网 IP |
 
 ## 已知限制
 
