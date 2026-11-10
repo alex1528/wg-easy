@@ -2,6 +2,10 @@ services:
   wg-easy:
     image: ccr.ccs.tencentyun.com/vpn-server/wg-easy:latest
     container_name: wg-easy
+    # 启动包装：先加隧道内访问 Web UI 的转发规则，再执行原来的启动命令
+    # 覆盖 entrypoint 后镜像默认的 CMD 不再生效，所以 command 要写全
+    entrypoint: ["/bin/sh", "/opt/wg-easy-hairpin.sh"]
+    command: ["/usr/bin/dumb-init", "node", "server/index.mjs"]
     environment:
       # Web UI 仍在容器内部监听 51821（纯 HTTP），只给 caddy 访问，不再直接对外发布
       - PORT=51821
@@ -10,6 +14,13 @@ services:
       - INSECURE=false
       # 只信任 caddy 转发的 X-Forwarded-Host / X-Forwarded-For
       - TRUSTED_PROXIES=10.42.42.43,fdcc:ad94:bacf:61a3::2b
+      # VPN 客户端在隧道内访问 Web UI（如“立即同步配置”）时直接在容器内转给 Caddy，不绕公网，见 deploy/wg-easy-hairpin.sh
+      - WG_HAIRPIN=${WG_HAIRPIN:-true}
+      - WG_HAIRPIN_DPORTS=${WG_HAIRPIN_DPORTS:-51821}
+      - WG_HAIRPIN_DST4=${WG_HAIRPIN_DST4:-}
+      - WG_HAIRPIN_DST6=${WG_HAIRPIN_DST6:-}
+      - WG_HAIRPIN_CADDY_IPV4=10.42.42.43
+      - WG_HAIRPIN_CADDY_IPV6=fdcc:ad94:bacf:61a3::2b
     networks:
       wg:
         ipv4_address: 10.42.42.42
@@ -17,6 +28,7 @@ services:
     volumes:
       - ./data:/etc/wireguard
       - /lib/modules:/lib/modules:ro
+      - ./deploy/wg-easy-hairpin.sh:/opt/wg-easy-hairpin.sh:ro
     ports:
       - "51820:51820/udp"
       # 不再发布 51821/tcp：wg-easy 仍在自己容器内监听 10.42.42.42:51821（纯 HTTP），

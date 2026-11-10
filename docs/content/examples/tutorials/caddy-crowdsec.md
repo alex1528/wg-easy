@@ -231,6 +231,26 @@ wg-easy 改用了 syslog 日志驱动，容器会被重建，VPN 会断开几秒
 
 ///
 
+### 隧道内访问 Web UI
+
+VPN 客户端连上隧道后再访问 `https://<WG_WEB_HOST>:51821`（例如客户端的“立即同步配置”、OIDC 回调 `/api/auth/oidc/callback`），流量会先进隧道，到 wg-easy 容器后再出公网回到服务器自己的公网 IP。这条回环路径经常走不通：服务器在路由器或防火墙的 NAT 后面且不支持 NAT 回流，或者宿主机防火墙丢弃来自 Docker 网桥的入站，表现为请求超时，而访问其他网站正常。
+
+`deploy/wg-easy-hairpin.sh` 作为 wg-easy 的启动包装，在 wg-easy 容器内加两类规则，然后照常启动 wg-easy：
+
+- 从 `wg0` 进来、目的端口是 `51821` 的 TCP，直接 DNAT 到 Caddy（`10.42.42.43:51821`），不再出公网。域名、证书和 URL 都不变
+- 进出 `wg0` 的 TCP 做 MSS 钳制，避免 TLS 证书链这类大包在隧道里被丢
+
+默认开启（`WG_HAIRPIN=true`），不限目的地址。只想拦截访问服务器公网 IP 的流量时，在 `.env` 中设置 `WG_HAIRPIN_DST4`（IPv6 用 `WG_HAIRPIN_DST6`）。规则添加失败只打印警告，不会影响 VPN 启动。
+
+验证（客户端先连上隧道，再点一次同步配置）：
+
+```shell
+docker logs wg-easy 2>&1 | grep hairpin                                   # 启动时添加的规则
+docker exec wg-easy iptables -t nat -L PREROUTING -v -n | grep 51821     # pkts 计数应随访问增长
+```
+
+经过这条路径时，Caddy 看到的来源 IP 是 wg-easy 容器的 `10.42.42.42`，所有隧道内的用户共用一个限流额度；这个地址属于内网，CrowdSec 默认不会封禁。如果设置了 `WG_ALLOW_IPS`，需要把 `10.42.42.42` 加进去，否则隧道内的请求会被 Caddy 直接断开。
+
 ## 第 4 步：验证
 
 下面的 `<WG_WEB_HOST>` 换成 `.env` 中的值。`internal` 模式下 curl 需要加 `-k`。
@@ -518,6 +538,7 @@ docker compose -f docker-compose-dirty.yml up -d --force-recreate crowdsec caddy
 | `http` 模式日志报 `Timeout during connect (likely firewall problem)` 或 `Cannot negotiate ALPN protocol` | 80 或 443 端口从公网访问不到，或被其他服务占用。改用 DNS 验证，或用已有证书（`file` 模式） |
 | `file` 模式启动报 `loading certificates` / `no such file` / `permission denied` | 文件名与 `CADDY_TLS_CERT_FILE`、`CADDY_TLS_KEY_FILE` 不一致，或文件属主不是 root。按“使用已有证书”第 2 步设置权限 |
 | 浏览器提示证书不受信任，但证书是购买的 | 证书文件缺少中间证书。使用证书厂商提供的 bundle / fullchain 文件 |
+| VPN 隧道连上后，访问 Web UI 或 OIDC 回调超时，访问其他网站正常 | 流量绕公网回到服务器自己被拦住。确认 `WG_HAIRPIN=true`，并按“隧道内访问 Web UI”检查规则计数 |
 
 ## 已知限制
 
