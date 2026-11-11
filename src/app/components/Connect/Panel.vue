@@ -99,6 +99,23 @@
               <p class="text-sm text-gray-500 dark:text-neutral-300">
                 {{ data.client.name }}
               </p>
+              <p
+                v-if="data.limit"
+                class="text-xs"
+                :class="
+                  data.limit.reached
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-gray-400 dark:text-neutral-400'
+                "
+                data-testid="client-limit"
+              >
+                {{
+                  $t('connect.limitUsage', {
+                    used: data.limit.used,
+                    max: data.limit.max,
+                  })
+                }}
+              </p>
               <div class="flex flex-wrap justify-center gap-2">
                 <a
                   :href="`/api/client/${data.client.id}/configuration`"
@@ -108,7 +125,15 @@
                   <IconsDownload class="size-4" />
                   {{ $t('client.downloadConfig') }}
                 </a>
-                <BaseDialog trigger-class="inline-flex">
+                <span
+                  v-if="limitReached"
+                  class="inline-flex cursor-not-allowed items-center gap-2 rounded bg-gray-100 px-3 py-2 text-sm text-gray-400 dark:bg-neutral-700 dark:text-neutral-500"
+                  :title="limitMessage"
+                >
+                  <IconsSparkles class="size-4" />
+                  {{ $t('connect.regenerate') }}
+                </span>
+                <BaseDialog v-else trigger-class="inline-flex">
                   <template #trigger>
                     <span
                       class="inline-flex items-center gap-2 rounded bg-gray-100 px-3 py-2 text-sm transition hover:bg-red-800 hover:text-white dark:bg-neutral-600 dark:text-neutral-300 dark:hover:bg-red-800 dark:hover:text-white"
@@ -142,12 +167,31 @@
               </div>
               <BasePrimaryButton
                 v-if="data"
-                :disabled="creating"
+                :disabled="creating || limitReached"
+                :class="{ 'cursor-not-allowed opacity-50': limitReached }"
                 @click="create"
               >
                 {{ $t('connect.generate') }}
               </BasePrimaryButton>
+              <p
+                v-if="data?.limit"
+                class="text-xs text-gray-400 dark:text-neutral-400"
+              >
+                {{
+                  $t('connect.limitUsage', {
+                    used: data.limit.used,
+                    max: data.limit.max,
+                  })
+                }}
+              </p>
             </template>
+            <p
+              v-if="limitReached"
+              class="flex max-w-xs items-start gap-1 text-left text-xs text-amber-600 dark:text-amber-400"
+            >
+              <IconsWarning class="mt-0.5 size-4 shrink-0" />
+              {{ limitMessage }}
+            </p>
           </section>
         </div>
       </PanelBody>
@@ -160,6 +204,15 @@ type ConnectData = Awaited<ReturnType<typeof fetchConnect>>;
 
 const clientsStore = useClientsStore();
 const isAdmin = usePermission('admin', 'any');
+const { t } = useI18n();
+
+/** "Max Clients per User" reached (never for admins) */
+const limitReached = computed(() => data.value?.limit?.reached === true);
+const limitMessage = computed(() =>
+  data.value?.limit
+    ? t('connect.limitReached', { max: data.value.limit.max })
+    : ''
+);
 
 const placeholderClass =
   'flex size-52 items-center justify-center rounded border-2 border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-400 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-400';
@@ -228,6 +281,14 @@ const ownClientState = computed(() => {
   const c = clientsStore.clients?.find((v) => v.id === id);
   return c ? `${c.enabled}-${c.name}-${c.updatedAt}` : 'missing';
 });
+// deleting / creating clients in the list changes the usage
+const ownClientCount = computed(() => clientsStore.clients?.length ?? null);
+watch(ownClientCount, (now, before) => {
+  if (data.value?.limit && before !== null && now !== before) {
+    void refresh();
+  }
+});
+
 watch(ownClientState, (now, before) => {
   if (before !== undefined && now !== before) {
     void refresh();

@@ -85,7 +85,22 @@
               ? $t('admin.users.statusEnabled')
               : $t('admin.users.statusDisabled')
           }}
-          · {{ $t('admin.users.clientCount', { count: user.clientCount }) }}
+          ·
+          <span
+            :class="{
+              'font-semibold text-amber-600 dark:text-amber-400': atLimit,
+            }"
+            :title="atLimit ? $t('admin.users.clientLimitReached') : undefined"
+          >
+            {{
+              clientLimit === null
+                ? $t('admin.users.clientCount', { count: user.clientCount })
+                : $t('admin.users.clientCountLimit', {
+                    count: user.clientCount,
+                    max: clientLimit,
+                  })
+            }}
+          </span>
         </span>
         <span>{{ lastLogin }}</span>
       </div>
@@ -164,6 +179,8 @@ const props = defineProps<{
   user: AdminUser;
   activeAdmins: number;
   adminGroupsConfigured: boolean;
+  /** 0 = unlimited */
+  maxClients: number;
 }>();
 
 const emit = defineEmits<{ changed: [] }>();
@@ -171,6 +188,16 @@ const emit = defineEmits<{ changed: [] }>();
 const { t, locale } = useI18n();
 
 const expanded = ref(false);
+
+/** admins are not limited */
+const clientLimit = computed(() =>
+  props.user.role === 'ADMIN' || props.maxClients <= 0
+    ? null
+    : props.maxClients
+);
+const atLimit = computed(
+  () => clientLimit.value !== null && props.user.clientCount >= clientLimit.value
+);
 
 const initials = computed(() =>
   (props.user.name || props.user.username)

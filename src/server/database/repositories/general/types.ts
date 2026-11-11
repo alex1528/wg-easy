@@ -26,6 +26,13 @@ const liveWireGuardAudience = z
   .min(1, { message: t('zod.general.liveWireGuardAudience') })
   .pipe(safeStringRefine);
 
+/** 0 = unlimited */
+const maxClientsPerUser = z
+  .number({ message: t('zod.general.maxClientsPerUser') })
+  .int({ message: t('zod.general.maxClientsPerUser') })
+  .min(0, { message: t('zod.general.maxClientsPerUser') })
+  .max(1000, { message: t('zod.general.maxClientsPerUser') });
+
 export const GeneralUpdateSchema = z.object({
   sessionTimeout: sessionTimeout,
   metricsPrometheus: metricsEnabled,
@@ -33,6 +40,7 @@ export const GeneralUpdateSchema = z.object({
   metricsPassword: metricsPassword,
   liveWireGuardEnabled: liveWireGuardEnabled,
   liveWireGuardAudience: liveWireGuardAudience,
+  maxClientsPerUser: maxClientsPerUser,
 });
 
 export type GeneralUpdateType = z.infer<typeof GeneralUpdateSchema>;

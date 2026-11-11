@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OIDC role mapping: configure admin groups, groups claim and panel login scopes in Admin Panel → OIDC (or `OAUTH_OIDC_ADMIN_GROUPS`, `OAUTH_OIDC_GROUPS_CLAIM`, `OAUTH_OIDC_SCOPES`)
 - Admins can choose the owner when creating a client; clients show their owner
 - CLI: `db:user:list`, `db:user:promote`, `db:admin:reset --username`
+- Max clients per user (Admin Panel → General, default 5, 0 = unlimited) for clients users create themselves and new LiveWireGuard devices
+- Complete Simplified Chinese (zh-CN) translation; error messages shown in the panel are translated, OAuth login errors are shown on the login / account page instead of a JSON error page
 
 ### Changed
 

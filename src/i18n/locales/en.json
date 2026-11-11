@@ -57,7 +57,12 @@
     "loading": "Loading...",
     "2fa": "Two Factor Authentication",
     "2faCode": "TOTP Code",
-    "externalAuth": "External Authentication"
+    "externalAuth": "External Authentication",
+    "clearSearch": "Clear search",
+    "selectLanguage": "Select language",
+    "close": "Close",
+    "chooseOption": "Choose option",
+    "select": "Select..."
   },
   "setup": {
     "welcome": "Welcome to your first setup of wg-easy",
@@ -148,7 +153,8 @@
     "ownerSelf": "Me",
     "ownerDesc": "User the client belongs to",
     "readOnlyAdvanced": "Addresses, allowed IPs, firewall, DNS, MTU, AmneziaWG and hooks can only be changed by an admin.",
-    "setByAdmin": "Set by an admin"
+    "setByAdmin": "Set by an admin",
+    "ownerOverLimit": "This user already has {count} clients (limit {max}). Admins can still create clients for them."
   },
   "dialog": {
     "change": "Change",
@@ -198,7 +204,12 @@
       "liveWireGuardStatusDesc": "Saved state of the LiveWireGuard endpoint",
       "liveWireGuardStatusOn": "Enabled",
       "liveWireGuardStatusOff": "Disabled",
-      "unsaved": "Unsaved changes, click Save to apply"
+      "unsaved": "Unsaved changes, click Save to apply",
+      "clients": "Clients",
+      "maxClientsPerUser": "Max Clients per User",
+      "maxClientsPerUserDesc": "How many clients a user can create themselves (home page QR code, new LiveWireGuard devices). Every client of the user counts, including disabled ones. Admins are not limited, neither are clients an admin creates for a user. Lowering the value keeps existing clients.",
+      "maxClientsPerUserHint": "0 = unlimited. Admins are not limited.",
+      "maxClientsPerUserUnlimited": "Unlimited: users can create any number of clients."
     },
     "config": {
       "connection": "Connection",
@@ -343,7 +354,9 @@
       "showGroups": "Show groups",
       "hideGroups": "Hide groups",
       "legacyAdmins": "{count} admin(s) were registered via OIDC and follow the OIDC groups, but no admin groups are configured, so they stay admins. Configure admin groups or change their role.",
-      "configureGroups": "Configure admin groups"
+      "configureGroups": "Configure admin groups",
+      "clientCountLimit": "{count} / {max} clients",
+      "clientLimitReached": "Client limit reached: the user can not create more clients"
     }
   },
   "zod": {
@@ -392,7 +405,8 @@
       "metricsPassword": "Metrics Password",
       "liveWireGuardEnabled": "LiveWireGuard",
       "liveWireGuardAudience": "LiveWireGuard Audience",
-      "liveWireGuardEndpointUrl": "LiveWireGuard endpoint URL must be a valid http(s) URL"
+      "liveWireGuardEndpointUrl": "LiveWireGuard endpoint URL must be a valid http(s) URL",
+      "maxClientsPerUser": "Max clients per user must be a whole number between 0 and 1000"
     },
     "interface": {
       "cidr": "CIDR",
@@ -515,6 +529,55 @@
     "regenerate": "Regenerate",
     "regenerateDesc": "A new client with a new key pair will be created and shown here. Your existing clients are kept and can be deleted in the list below.",
     "endpointEnable": "Enable it in Admin Panel → General",
-    "endpointAskAdmin": "Please ask an admin to enable it."
+    "endpointAskAdmin": "Please ask an admin to enable it.",
+    "limitUsage": "{used} / {max} clients used",
+    "limitReached": "You reached the maximum of {max} clients. Delete a client you no longer use in the list below to create a new one."
+  },
+  "error": {
+    "permissionDenied": "You don't have permission to do this",
+    "server": "Server error. See the server log for details",
+    "invalidCredentials": "Invalid username or password",
+    "userDisabled": "This account is disabled",
+    "passwordAuthDisabled": "Password login is disabled",
+    "unexpected": "Unexpected error",
+    "noPendingLogin": "No pending login. Please log in again",
+    "oauthFailed": "Login with the external provider failed. Please try again or contact an admin",
+    "oauthStateMissing": "The login session expired. Please try again",
+    "oauthAutoRegisterDisabled": "No account is linked with this identity and automatic registration is disabled. Ask an admin to create your account, or log in and link it on the account page",
+    "oauthAlreadyLinked": "The account with this email is already linked with another identity",
+    "oauthEmailNotVerified": "The identity provider reports your email as not verified",
+    "oauthNoEmail": "The identity provider did not send an email address",
+    "oauthNoSub": "The identity provider did not send a user id",
+    "oauthDomainNotAllowed": "Logins with this email domain are not allowed",
+    "oauthProviderDisabled": "This login method is not enabled",
+    "oauthInvalidProvider": "Unknown login method",
+    "oauthUserLinked": "Your account is already linked with an external provider. Unlink it first",
+    "oauthIdentityTaken": "This identity is already linked with another account",
+    "unlinkNoPassword": "Set a password before unlinking, otherwise you can't log in anymore",
+    "invalidPassword": "Incorrect password",
+    "invalidTotpCode": "Invalid TOTP code",
+    "totpAlreadyEnabled": "Two factor authentication is already enabled",
+    "totpNotEnabled": "Two factor authentication is not enabled",
+    "totpNotSetUp": "Set up two factor authentication first",
+    "invalidRequest": "Invalid request",
+    "userExists": "A user with this username already exists",
+    "userNotFound": "User not found",
+    "selfChange": "You can't change your own account",
+    "lastAdmin": "At least one enabled admin is required",
+    "notOidcUser": "This user is not linked with OIDC",
+    "noAdminGroups": "No admin groups configured",
+    "oidcRequired": "Password login is disabled, so OIDC must stay enabled and configured",
+    "clientNotFound": "Client not found",
+    "clientExpired": "The client is expired. Change the expiry date first",
+    "ownerNotFound": "The selected owner does not exist",
+    "noAddresses": "No addresses available, the address range of the interface is full",
+    "tooManyRequests": "Too many requests. Please try again later",
+    "ipv4OutOfRange": "The IPv4 address is not within the address range (CIDR) of the interface",
+    "ipv6OutOfRange": "The IPv6 address is not within the address range (CIDR) of the interface",
+    "firewallToolsMissing": "Per-Client Firewall requires {tools} to be installed on the host system",
+    "oneTimeLinkInvalid": "Invalid one-time link",
+    "oneTimeLinkExpired": "The one-time link has expired",
+    "setupDone": "The setup is already done",
+    "setupStep": "Invalid setup step, please reload the page"
   }
 }

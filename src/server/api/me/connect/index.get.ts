@@ -2,6 +2,7 @@ import { setHeader } from 'h3';
 
 import Database from '#server/utils/Database';
 import WireGuard from '#server/utils/WireGuard';
+import { clientLimitFor, clientUsage } from '#server/utils/clientLimit';
 import { definePermissionEventHandler } from '#server/utils/handler';
 import { getSetupInfo } from '#server/utils/oidcSetup';
 
@@ -18,10 +19,19 @@ export default definePermissionEventHandler(
     checkPermissions(user);
     setHeader(event, 'Cache-Control', 'no-store');
 
-    const [setup, connectClient] = await Promise.all([
-      getSetupInfo(event),
-      Database.clients.getConnectClient(user.id),
-    ]);
+    const [setup, connectClient, maxClientsPerUser, clientCount] =
+      await Promise.all([
+        getSetupInfo(event),
+        Database.clients.getConnectClient(user.id),
+        Database.general.getMaxClientsPerUser(),
+        Database.clients.countForUser(user.id),
+      ]);
+
+    /** null = unlimited (admins, or limit set to 0) */
+    const limit = clientUsage(
+      clientCount,
+      clientLimitFor(user, maxClientsPerUser)
+    );
 
     let client: {
       id: number;
@@ -37,6 +47,6 @@ export default definePermissionEventHandler(
       client = { ...connectClient, revision };
     }
 
-    return { setup, client };
+    return { setup, client, limit };
   }
 );

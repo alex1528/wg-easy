@@ -10,6 +10,24 @@
         />
       </FormGroup>
       <FormGroup>
+        <FormHeading>{{ $t('admin.general.clients') }}</FormHeading>
+        <FormNumberField
+          id="maxClientsPerUser"
+          v-model="data.maxClientsPerUser"
+          :label="$t('admin.general.maxClientsPerUser')"
+          :description="$t('admin.general.maxClientsPerUserDesc')"
+        />
+        <span
+          class="col-span-2 text-xs text-gray-500 md:col-span-1 md:col-start-2 dark:text-neutral-400"
+        >
+          {{
+            data.maxClientsPerUser === 0
+              ? $t('admin.general.maxClientsPerUserUnlimited')
+              : $t('admin.general.maxClientsPerUserHint')
+          }}
+        </span>
+      </FormGroup>
+      <FormGroup>
         <FormHeading>{{ $t('admin.general.metrics') }}</FormHeading>
         <FormNullTextField
           id="password"

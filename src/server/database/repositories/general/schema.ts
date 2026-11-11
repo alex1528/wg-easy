@@ -20,6 +20,9 @@ export const general = sqliteTable('general_table', {
     .notNull()
     .default('livewireguard'),
 
+  /** max clients a non admin user can create themselves, 0 = unlimited */
+  maxClientsPerUser: int('max_clients_per_user').notNull().default(5),
+
   createdAt: text('created_at')
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)`),

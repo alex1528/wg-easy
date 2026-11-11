@@ -1,15 +1,17 @@
 import { createError, defineEventHandler, sendRedirect } from 'h3';
+import type { H3Event } from 'h3';
 
 import Database from '#server/utils/Database';
 import { SERVER_DEBUG } from '#server/utils/config';
+import { oauthErrorRedirect } from '#server/utils/i18nError';
 import { buildOauthConfig, getUserInfoWithClaims } from '#server/utils/oauth';
 import { extractGroups, mergeClaims } from '#server/utils/oidcRole';
 import { getEffectiveOidcRoleMapping } from '#server/utils/oidcRuntime';
 import { useWGSession } from '#server/utils/session';
-import type { OidcRoleInput } from '#db/repositories/user/service';
 import { assertUnreachable } from '#server/utils/types';
+import type { OidcRoleInput } from '#db/repositories/user/service';
 
-export default defineEventHandler(async (event) => {
+async function handleCallback(event: H3Event) {
   const { config, provider, providerConfig } = await buildOauthConfig(event);
 
   const session = await useWGSession(event);
@@ -111,4 +113,13 @@ export default defineEventHandler(async (event) => {
   );
 
   return sendRedirect(event, '/');
+}
+
+/** errors are shown on the login page (no JSON error page) */
+export default defineEventHandler(async (event) => {
+  try {
+    return await handleCallback(event);
+  } catch (err) {
+    return oauthErrorRedirect(event, err, '/login');
+  }
 });

@@ -29,6 +29,17 @@
               }}
             </option>
           </select>
+          <p
+            v-if="ownerOverLimit"
+            class="text-xs text-amber-600 dark:text-amber-400"
+          >
+            {{
+              $t('client.ownerOverLimit', {
+                count: ownerOverLimit.count,
+                max: ownerOverLimit.max,
+              })
+            }}
+          </p>
         </div>
       </div>
     </template>
@@ -50,8 +61,26 @@ const name = ref<string>('');
 const expiresAt = ref<string | null>(null);
 const ownerId = ref<number | null>(null);
 const owners = ref<
-  { id: number; username: string; name: string; isSelf: boolean }[]
+  {
+    id: number;
+    username: string;
+    name: string;
+    isSelf: boolean;
+    isAdmin: boolean;
+    clientCount: number;
+  }[]
 >([]);
+const maxClientsPerUser = ref(0);
+
+/** admins can exceed the per user limit, but show it */
+const ownerOverLimit = computed(() => {
+  const owner = owners.value.find((o) => o.id === ownerId.value);
+  const max = maxClientsPerUser.value;
+  if (!owner || owner.isAdmin || max <= 0 || owner.clientCount < max) {
+    return null;
+  }
+  return { count: owner.clientCount, max };
+});
 const authStore = useAuthStore();
 const clientsStore = useClientsStore();
 
@@ -72,6 +101,7 @@ function resetOnOpen(open: boolean) {
 async function loadOwners() {
   try {
     const res = await $fetch('/api/admin/users', { method: 'get' });
+    maxClientsPerUser.value = res.maxClientsPerUser;
     owners.value = res.users
       .filter((u) => u.enabled)
       .map((u) => ({
@@ -79,6 +109,8 @@ async function loadOwners() {
         username: u.username,
         name: u.name,
         isSelf: u.isSelf,
+        isAdmin: u.role === 'ADMIN',
+        clientCount: u.clientCount,
       }));
   } catch {
     owners.value = [];

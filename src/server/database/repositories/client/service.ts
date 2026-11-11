@@ -16,6 +16,7 @@ import {
   connectClientName,
   pickConnectClient,
 } from '#server/utils/connectClient';
+import { ClientLimitReachedError } from '#server/utils/clientLimit';
 import type { ID } from '#server/utils/types';
 import { wg } from '#server/utils/wgHelper';
 import type { DBType } from '#db/sqlite';
@@ -347,13 +348,43 @@ export class ClientService {
     };
   }
 
+  /** number of clients of a user (enabled and disabled) */
+  countForUser(userId: ID) {
+    return this.#db.$count(client, eq(client.userId, userId));
+  }
+
+  /**
+   * checked inside the creating transaction, so parallel requests can't
+   * exceed the limit
+   * @param limit null = unlimited
+   * @throws {ClientLimitReachedError}
+   */
+  async #assertBelowLimit(
+    tx: Parameters<Parameters<DBType['transaction']>[0]>[0],
+    userId: ID,
+    limit: number | null
+  ) {
+    if (limit === null) return;
+    const count = await tx.$count(client, eq(client.userId, userId));
+    if (count >= limit) {
+      throw new ClientLimitReachedError(limit, count);
+    }
+  }
+
   /**
    * Create a new client for the user and make it the default connect client.
    * Older clients are kept.
+   * @param limit max clients of the user, null = unlimited
    * @throws {MaxClientsReachedError}
+   * @throws {ClientLimitReachedError}
    */
-  async createConnectClient(user: { id: ID; username: string }) {
+  async createConnectClient(
+    user: { id: ID; username: string },
+    limit: number | null = null
+  ) {
     return this.#db.transaction(async (tx) => {
+      await this.#assertBelowLimit(tx, user.id, limit);
+
       await tx
         .update(client)
         .set({ isDefault: false })
@@ -420,10 +451,14 @@ export class ClientService {
     deviceId: string;
     publicKey: string;
     name: string;
+    /** max clients of the user, null / undefined = unlimited */
+    limit?: number | null;
   }): Promise<{ clientId: ID }> {
     const preSharedKey = await wg.generatePreSharedKey();
 
     return this.#db.transaction(async (tx) => {
+      await this.#assertBelowLimit(tx, input.userId, input.limit ?? null);
+
       const clients = await tx.query.client.findMany().execute();
       const clientInterface = await tx.query.wgInterface
         .findFirst({

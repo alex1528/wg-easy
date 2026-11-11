@@ -55,9 +55,18 @@ export function useSubmit<T>(
           return;
         }
       } else if (e instanceof FetchError) {
+        // unhandled server errors only say "Server Error"
+        const message =
+          typeof e.data?.message === 'string' &&
+          e.data.message !== '' &&
+          e.data.message !== 'Server Error'
+            ? e.data.message
+            : (e.statusCode ?? 500) >= 500
+              ? t('error.server')
+              : t('toast.unknown');
         toast.showToast({
           type: 'error',
-          message: e.data.message,
+          message,
         });
       } else if (e instanceof Error) {
         toast.showToast({

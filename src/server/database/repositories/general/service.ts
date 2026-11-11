@@ -41,6 +41,14 @@ function createPreparedStatement(db: DBType) {
           metricsPassword: true,
           liveWireGuardEnabled: true,
           liveWireGuardAudience: true,
+          maxClientsPerUser: true,
+        },
+      })
+      .prepare(),
+    getMaxClientsPerUser: db.query.general
+      .findFirst({
+        columns: {
+          maxClientsPerUser: true,
         },
       })
       .prepare(),
@@ -140,6 +148,20 @@ export class GeneralService {
     }
 
     return result;
+  }
+
+  /**
+   * max clients a non admin user can create themselves, 0 = unlimited
+   * @throws
+   */
+  async getMaxClientsPerUser() {
+    const result = await this.#statements.getMaxClientsPerUser.execute();
+
+    if (!result) {
+      throw new Error('General Config not found');
+    }
+
+    return result.maxClientsPerUser;
   }
 
   /**

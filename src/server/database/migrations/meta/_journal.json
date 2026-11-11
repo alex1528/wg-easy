@@ -99,6 +99,13 @@
       "when": 1794362847683,
       "tag": "0013_user_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1794370204190,
+      "tag": "0014_max_clients_per_user",
+      "breakpoints": true
     }
   ]
 }

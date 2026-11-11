@@ -15,13 +15,16 @@ export default definePermissionEventHandler(
   async ({ event, user }) => {
     setHeader(event, 'Cache-Control', 'no-store');
 
-    const [users, roleMapping] = await Promise.all([
+    const [users, roleMapping, maxClientsPerUser] = await Promise.all([
       Database.users.listWithStats(),
       getEffectiveOidcRoleMapping(),
+      Database.general.getMaxClientsPerUser(),
     ]);
 
     return {
       adminGroupsConfigured: roleMapping.adminGroups.length > 0,
+      /** 0 = unlimited, admins are never limited */
+      maxClientsPerUser,
       users: users.map((u) => ({
         ...u,
         role: roleKey(u.role),

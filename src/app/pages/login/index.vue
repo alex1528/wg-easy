@@ -78,7 +78,12 @@ const password = ref<string>('');
 
 const { data: authMethods } = await useFetch('/api/auth/methods');
 
+/** don't auto launch again after a failed OAuth login (redirect loop) */
+const oauthFailed = useOauthError();
+
 watchEffect(() => {
+  if (oauthFailed) return;
+
   const autoLauchQuery =
     typeof route.query.auto_launch === 'string' && !!route.query.auto_launch
       ? route.query.auto_launch

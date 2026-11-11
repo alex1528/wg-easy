@@ -206,6 +206,9 @@ const roleText = computed(() => {
 
 const { data: authMethods } = await useFetch('/api/auth/methods');
 
+// errors of "link with external provider"
+useOauthError();
+
 const name = ref(authStore.userData?.name);
 const email = ref(authStore.userData?.email);
 const hasPassword = computed(() => authStore.userData?.hasPassword);

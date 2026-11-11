@@ -70,6 +70,7 @@
         :user="u"
         :active-admins="activeAdmins"
         :admin-groups-configured="data.adminGroupsConfigured"
+        :max-clients="data.maxClientsPerUser"
         @changed="refresh"
       />
       <p

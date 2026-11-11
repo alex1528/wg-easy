@@ -31,6 +31,17 @@ To prevent lockouts:
 
 If a user loses the admin role while having the Admin Panel open, their next action fails and they are sent back to the client list.
 
+## Client Limit
+
+**Admin Panel → General → Clients → Max Clients per User** limits how many clients a user can create themselves. The default is `5`, `0` means unlimited.
+
+- Counted: every client of the user, enabled or disabled
+- Limited: the **Generate** / **Regenerate** button of the home page QR code and new LiveWireGuard devices (the endpoint answers `409 device_limit_reached`, the app retries later). A device that logs in again keeps its client and is not counted twice
+- Not limited: admins, and clients an admin creates for a user in the panel (the dialog shows a hint when the owner is at the limit)
+- Lowering the limit keeps existing clients; the user can only create new ones after deleting old clients
+
+The home page shows the usage (`3 / 5 clients used`) and the users page shows it for every user.
+
 ## Role Source
 
 Every user has a role source:

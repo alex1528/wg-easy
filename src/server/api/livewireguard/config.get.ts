@@ -23,6 +23,10 @@ import {
   isValidPublicKey,
 } from '#server/utils/livewireGuardValidation';
 import { WG_ENV } from '#server/utils/config';
+import {
+  ClientLimitReachedError,
+  clientLimitFor,
+} from '#server/utils/clientLimit';
 import { MaxClientsReachedError } from '#db/repositories/client/service';
 
 // 60 requests per minute per IP
@@ -176,6 +180,11 @@ export default defineEventHandler(async (event) => {
   if (!clientRecord) {
     try {
       const created = await Database.clients.createForDevice({
+        // new devices count against "Max Clients per User"
+        limit: clientLimitFor(
+          user,
+          await Database.general.getMaxClientsPerUser()
+        ),
         userId: user.id,
         deviceId,
         publicKey,
@@ -187,6 +196,15 @@ export default defineEventHandler(async (event) => {
       }
       await WireGuard.saveConfig();
     } catch (err) {
+      if (err instanceof ClientLimitReachedError) {
+        // same code as the address pool: the app retries with backoff
+        return respondError(
+          event,
+          409,
+          'device_limit_reached',
+          `Client limit reached (${err.count}/${err.limit}), delete an old client in the panel`
+        );
+      }
       if (err instanceof MaxClientsReachedError) {
         return respondError(
           event,

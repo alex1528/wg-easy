@@ -9,6 +9,7 @@ const base = {
   metricsPassword: null,
   liveWireGuardEnabled: true,
   liveWireGuardAudience: 'livewireguard',
+  maxClientsPerUser: 5,
 };
 
 describe('GeneralUpdateRequestSchema liveWireGuardEndpointUrl', () => {
@@ -70,5 +71,29 @@ describe('GeneralUpdateRequestSchema liveWireGuardEndpointUrl', () => {
       GeneralUpdateRequestSchema.safeParse({ ...base, sessionTimeout: 'x' })
         .success
     ).toBe(false);
+  });
+});
+
+describe('GeneralUpdateRequestSchema maxClientsPerUser', () => {
+  test('accepts 0 (unlimited) to 1000', () => {
+    for (const value of [0, 1, 5, 1000]) {
+      expect(
+        GeneralUpdateRequestSchema.parse({ ...base, maxClientsPerUser: value })
+          .maxClientsPerUser
+      ).toBe(value);
+    }
+  });
+
+  test('rejects negative, too large, decimals, strings and missing', () => {
+    for (const value of [-1, 1001, 2.5, '5', '', null]) {
+      expect(
+        GeneralUpdateRequestSchema.safeParse({
+          ...base,
+          maxClientsPerUser: value,
+        }).success
+      ).toBe(false);
+    }
+    const { maxClientsPerUser: _, ...missing } = base;
+    expect(GeneralUpdateRequestSchema.safeParse(missing).success).toBe(false);
   });
 });
