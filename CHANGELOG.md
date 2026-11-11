@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Admins can choose the owner when creating a client; clients show their owner
 - CLI: `db:user:list`, `db:user:promote`, `db:admin:reset --username`
 - Max clients per user (Admin Panel → General, default 5, 0 = unlimited) for clients users create themselves and new LiveWireGuard devices
+- The LiveWireGuard endpoint is enabled by default on new installations (existing installations keep their setting)
 - Complete Simplified Chinese (zh-CN) translation; error messages shown in the panel are translated, OAuth login errors are shown on the login / account page instead of a JSON error page
 
 ### Changed

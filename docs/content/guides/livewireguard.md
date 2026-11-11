@@ -34,7 +34,7 @@ The endpoint does not use wg-easy session authentication. Requests are authentic
     | Redirect URI | `com.wuxichaorongtechnologycoltd.livewireguard:/oidc/callback` |
     | Scopes       | `openid profile email offline_access`                          |
 
-3. Enable the feature: **Admin Panel → General Settings → LiveWireGuard → Enabled**.
+3. Check that the feature is enabled: **Admin Panel → General Settings → LiveWireGuard → Enable LiveWireGuard Endpoint**. It is enabled by default on new installations; installations upgraded from an earlier version keep their previous setting. The endpoint only answers once OIDC is configured.
 
 ## Audience
 
