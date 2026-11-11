@@ -11,11 +11,28 @@
     >
       LiveWireGuard
     </span>
+    <span
+      v-if="showOwner"
+      class="ml-1 rounded bg-blue-50 px-1.5 py-0.5 align-middle text-xs text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+      :title="$t('client.owner')"
+    >
+      @{{ client.user?.username }}
+    </span>
   </div>
 </template>
 
 <script setup lang="ts">
-defineProps<{
+const props = defineProps<{
   client: LocalClient;
 }>();
+
+const authStore = useAuthStore();
+
+/** admins see the owner of clients that are not theirs */
+const showOwner = computed(
+  () =>
+    !!props.client.user &&
+    !!authStore.userData &&
+    props.client.user.id !== authStore.userData.id
+);
 </script>

@@ -39,6 +39,8 @@ function createPreparedStatement(db: DBType) {
       .findMany({
         with: {
           oneTimeLink: true,
+          // peers of disabled users are not added to the server config
+          user: { columns: { enabled: true } },
         },
       })
       .prepare(),
@@ -129,6 +131,7 @@ export class ClientService {
       .findMany({
         with: {
           oneTimeLink: true,
+          user: { columns: { id: true, username: true, name: true } },
         },
         where: and(...filters),
         columns: {
@@ -173,7 +176,10 @@ export class ClientService {
     const result = await this.#db.query.client
       .findMany({
         where: and(eq(client.userId, userId), ...filters),
-        with: { oneTimeLink: true },
+        with: {
+          oneTimeLink: true,
+          user: { columns: { id: true, username: true, name: true } },
+        },
         columns: {
           privateKey: false,
           preSharedKey: false,
@@ -210,11 +216,14 @@ export class ClientService {
     return this.#statements.findByIdPublic.execute({ id });
   }
 
-  async create({ name, expiresAt }: ClientCreateType) {
+  /**
+   * Create a client in the admin panel
+   * @param userId owner of the client
+   */
+  async create({ name, expiresAt }: ClientCreateType, userId: ID) {
     return this.#db.transaction(async (tx) => {
       const clientId = await this.#insertWithKeys(tx, {
-        // TODO: properly assign user id
-        userId: 1,
+        userId,
         name,
         expiresAt,
         isDefault: false,
@@ -359,6 +368,15 @@ export class ClientService {
       });
       return { clientId };
     });
+  }
+
+  /** the only field a non admin user can change */
+  updateName(id: ID, name: string) {
+    return this.#db
+      .update(client)
+      .set({ name })
+      .where(eq(client.id, id))
+      .execute();
   }
 
   toggle(id: ID, enabled: boolean) {

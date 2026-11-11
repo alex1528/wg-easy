@@ -8,11 +8,19 @@
       "config": "Config",
       "interface": "Interface",
       "hooks": "Hooks",
-      "oidc": "OIDC"
+      "oidc": "OIDC",
+      "users": "Users"
     }
   },
   "user": {
-    "email": "E-Mail"
+    "email": "E-Mail",
+    "role": "Role",
+    "roleAdmin": "Admin",
+    "roleClient": "User",
+    "roleSourceOidc": "OIDC groups",
+    "roleSourceManual": "Manual",
+    "roleSourceOidcDesc": "Calculated from the OIDC groups on every OIDC login",
+    "roleSourceManualDesc": "Set manually, not changed by OIDC groups"
   },
   "me": {
     "currentPassword": "Current Password",
@@ -25,7 +33,8 @@
     "linkOauth": "Link your account with an external provider",
     "unlinkOauth": "Unlink",
     "linkedWith": "Linked with {provider}",
-    "providerDisabled": "Your currently linked provider is not enabled"
+    "providerDisabled": "Your currently linked provider is not enabled",
+    "role": "Role"
   },
   "general": {
     "name": "Name",
@@ -134,7 +143,12 @@
     "firewallIps": "Firewall Allowed IPs",
     "firewallIpsDesc": "Destination IPs/CIDRs this client can access (server-side enforcement). Leave empty to use Allowed IPs. Supports optional port and protocol filtering. See docs for syntax.",
     "downloadPng": "Download PNG",
-    "copyPng": "Copy PNG"
+    "copyPng": "Copy PNG",
+    "owner": "Owner",
+    "ownerSelf": "Me",
+    "ownerDesc": "User the client belongs to",
+    "readOnlyAdvanced": "Addresses, allowed IPs, firewall, DNS, MTU, AmneziaWG and hooks can only be changed by an admin.",
+    "setByAdmin": "Set by an admin"
   },
   "dialog": {
     "change": "Change",
@@ -145,7 +159,8 @@
     "success": "Success",
     "saved": "Saved",
     "error": "Error",
-    "unknown": "Unknown error. See console for more details"
+    "unknown": "Unknown error. See console for more details",
+    "permissionChanged": "Your permissions have changed"
   },
   "form": {
     "actions": "Actions",
@@ -158,7 +173,8 @@
     "nullNotSet": "Not set",
     "set": "Set",
     "unset": "Unset",
-    "add": "Add"
+    "add": "Add",
+    "editFallbackHint": "click to edit it"
   },
   "admin": {
     "general": {
@@ -172,12 +188,17 @@
       "prometheus": "Prometheus",
       "prometheusDesc": "Route for Prometheus metrics",
       "liveWireGuard": "LiveWireGuard",
-      "liveWireGuardEnabled": "Enabled",
+      "liveWireGuardEnabled": "Enable LiveWireGuard Endpoint",
       "liveWireGuardEnabledDesc": "Allow LiveWireGuard clients to provision their config via OIDC (GET /api/livewireguard/config)",
       "liveWireGuardAudience": "Audience",
       "liveWireGuardAudienceDesc": "Expected audience (OIDC client id) of the LiveWireGuard app's tokens",
-      "liveWireGuardEndpoint": "Endpoint",
-      "liveWireGuardEndpointDesc": "Fill this URL into the LiveWireGuard app's import wizard"
+      "liveWireGuardEndpoint": "Endpoint URL",
+      "liveWireGuardEndpointDesc": "Config URL handed to the LiveWireGuard app (also encoded in the setup QR code). Empty = derived from the current host. The server path is always /api/livewireguard/config, a custom URL must reach it (e.g. via a reverse proxy). Same setting as Endpoint URL in Admin Panel → OIDC.",
+      "liveWireGuardStatus": "Status",
+      "liveWireGuardStatusDesc": "Saved state of the LiveWireGuard endpoint",
+      "liveWireGuardStatusOn": "Enabled",
+      "liveWireGuardStatusOff": "Disabled",
+      "unsaved": "Unsaved changes, click Save to apply"
     },
     "config": {
       "connection": "Connection",
@@ -237,7 +258,7 @@
       "appRedirectUri": "App Redirect URI",
       "appRedirectUriDesc": "Redirect URI of the app, must be registered in your identity provider",
       "endpointUrl": "Endpoint URL",
-      "endpointUrlDesc": "LiveWireGuard config endpoint. Empty = derived from the current host",
+      "endpointUrlDesc": "LiveWireGuard config endpoint. Empty = derived from the current host. Same setting as Admin Panel → General → LiveWireGuard → Endpoint URL",
       "preview": "Setup QR Code",
       "previewDesc": "Payload encoded in the QR code. It contains the client secret: only show it to trusted users.",
       "overridden": "Overridden",
@@ -252,7 +273,77 @@
       "secretPlaceholder": "Not stored",
       "secretWillSet": "Will be saved",
       "secretWillClear": "Will be cleared (fall back to .env)",
-      "secretStored": "Stored in database"
+      "secretStored": "Stored in database",
+      "roleMapping": "Role Mapping",
+      "roleMappingDesc": "Give OIDC users the admin role based on the groups sent by your identity provider",
+      "adminGroups": "Admin Groups",
+      "adminGroupsDesc": "Members of any of these groups are admins (OAUTH_OIDC_ADMIN_GROUPS). Case sensitive, a leading / is ignored. Entra ID sends group object ids.",
+      "adminGroupsEnv": "Not set. Using .env: {groups}",
+      "adminGroupsNone": "Not set. Role mapping is disabled, OIDC users keep their role and new users are users",
+      "groupsClaim": "Groups Claim",
+      "groupsClaimDesc": "Claim containing the groups (OAUTH_OIDC_GROUPS_CLAIM). Dotted paths like realm_access.roles are supported",
+      "panelScopes": "Panel Login Scopes",
+      "panelScopesDesc": "Scopes requested by the panel login (OAUTH_OIDC_SCOPES). Some providers (e.g. Okta) need an extra groups scope. Must contain openid",
+      "rules": "Rules",
+      "rule1": "New OIDC users are admins if they are member of an admin group, otherwise users",
+      "rule2": "Users following the OIDC groups are recalculated on every OIDC login (promoted or demoted)",
+      "rule3": "Users whose role was set manually are not changed",
+      "rule4": "If the groups claim is missing, the role is not changed",
+      "rule5": "There is always at least one enabled admin",
+      "selfCheck": "Self Check",
+      "selfGroups": "Groups of your last OIDC login",
+      "selfNoGroups": "No groups received on your last OIDC login. Check the groups claim and scopes.",
+      "selfMatched": "Matched admin groups: {groups}",
+      "selfNotMatched": "You are not in an admin group. Your role is kept because it was set manually or you are the last admin.",
+      "resync": "Recalculate roles now",
+      "resyncDesc": "Apply the saved admin groups to all users following the OIDC groups, using the groups of their last login",
+      "resyncDone": "{changed} user(s) updated, {skipped} skipped (last admin)"
+    },
+    "users": {
+      "desc": "Users of this panel. Admins can manage all users, clients and settings; users can only see and manage their own clients.",
+      "total": "All users",
+      "admins": "Admins",
+      "clients": "Users",
+      "disabled": "Disabled",
+      "search": "Search username, name or email...",
+      "filterAll": "All",
+      "filterAdmin": "Admins",
+      "filterClient": "Users",
+      "filterDisabled": "Disabled",
+      "empty": "No users found",
+      "you": "You",
+      "statusEnabled": "Enabled",
+      "statusDisabled": "Disabled",
+      "loginPassword": "Password",
+      "loginTotp": "2FA enabled",
+      "clientCount": "{count} clients",
+      "lastLogin": "Last login: {date}",
+      "neverLoggedIn": "Never logged in",
+      "promote": "Make admin",
+      "demote": "Make user",
+      "followOidc": "Follow OIDC groups",
+      "disable": "Disable",
+      "enable": "Enable",
+      "promoteDesc": "{name} will be able to manage all users, clients and settings.",
+      "demoteDesc": "{name} will only be able to see and manage their own clients. This takes effect immediately.",
+      "followOidcDesc": "The role of {name} will be calculated from the OIDC groups on every OIDC login.",
+      "followOidcAdmin": "Based on the last login ({groups}) {name} will be an admin.",
+      "followOidcClient": "Based on the last login {name} is not in an admin group and will be a user.",
+      "followOidcUnknown": "No groups known yet: the role is kept until the next OIDC login.",
+      "disableDesc": "{name} will not be able to log in and their VPN clients will stop working. You can enable the user again at any time.",
+      "enableDesc": "{name} will be able to log in again and their VPN clients will work again.",
+      "manualNote": "The role will be set manually and no longer follow the OIDC groups. You can switch back at any time.",
+      "selfHint": "You cannot change your own account",
+      "lastAdminHint": "At least one enabled admin is required",
+      "notOidcHint": "Only for users linked with OIDC",
+      "groups": "Groups of the last OIDC login",
+      "noGroups": "No groups received yet",
+      "matched": "Matched admin groups: {groups}",
+      "notMatched": "No admin group matched",
+      "showGroups": "Show groups",
+      "hideGroups": "Hide groups",
+      "legacyAdmins": "{count} admin(s) were registered via OIDC and follow the OIDC groups, but no admin groups are configured, so they stay admins. Configure admin groups or change their role.",
+      "configureGroups": "Configure admin groups"
     }
   },
   "zod": {
@@ -288,7 +379,9 @@
       "passwordMatch": "Passwords must match",
       "totpEnable": "TOTP Enable",
       "totpEnableTrue": "TOTP Enable must be true",
-      "totpCode": "TOTP Code"
+      "totpCode": "TOTP Code",
+      "id": "User ID",
+      "role": "Role must be ADMIN or CLIENT"
     },
     "userConfig": {
       "host": "Host"
@@ -298,7 +391,8 @@
       "metricsEnabled": "Metrics",
       "metricsPassword": "Metrics Password",
       "liveWireGuardEnabled": "LiveWireGuard",
-      "liveWireGuardAudience": "LiveWireGuard Audience"
+      "liveWireGuardAudience": "LiveWireGuard Audience",
+      "liveWireGuardEndpointUrl": "LiveWireGuard endpoint URL must be a valid http(s) URL"
     },
     "interface": {
       "cidr": "CIDR",
@@ -331,7 +425,10 @@
       "scopes": "Scopes",
       "scopesOpenid": "Scopes must contain openid",
       "redirectUri": "Redirect URI must be a valid URI",
-      "endpointUrl": "Endpoint URL must be a valid URL"
+      "endpointUrl": "Endpoint URL must be a valid URL",
+      "adminGroups": "Admin groups (max. 50, each max. 256 characters)",
+      "groupsClaim": "Groups claim must not contain spaces",
+      "panelScopes": "Panel login scopes"
     }
   },
   "hooks": {
@@ -409,13 +506,15 @@
     "setupOpen": "Open in LiveWireGuard",
     "setupCopy": "Copy link",
     "setupCopied": "Copied",
-    "endpointDisabled": "The LiveWireGuard endpoint is disabled (Admin → General). The app won't be able to fetch its config.",
+    "endpointDisabled": "The LiveWireGuard endpoint is disabled. The app won't be able to fetch its config.",
     "oidcNotConfigured": "OIDC is not configured",
     "clientTitle": "WireGuard config",
     "clientDisabled": "This client is disabled",
     "noClient": "You don't have a client yet",
     "generate": "Generate",
     "regenerate": "Regenerate",
-    "regenerateDesc": "A new client with a new key pair will be created and shown here. Your existing clients are kept and can be deleted in the list below."
+    "regenerateDesc": "A new client with a new key pair will be created and shown here. Your existing clients are kept and can be deleted in the list below.",
+    "endpointEnable": "Enable it in Admin Panel → General",
+    "endpointAskAdmin": "Please ask an admin to enable it."
   }
 }

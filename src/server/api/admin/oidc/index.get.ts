@@ -1,11 +1,16 @@
 import Database from '#server/utils/Database';
 import { definePermissionEventHandler } from '#server/utils/handler';
-import { getOidcEnv } from '#server/utils/oidcRuntime';
+import { matchAdminGroups } from '#server/utils/oidcRole';
+import { getOidcEnv, getOidcRoleEnv } from '#server/utils/oidcRuntime';
 import {
   DEFAULT_APP_REDIRECT_URI,
   DEFAULT_APP_SCOPES,
+  DEFAULT_GROUPS_CLAIM,
   DEFAULT_OIDC_NAME,
+  DEFAULT_PANEL_SCOPES,
   resolveOidcConfig,
+  resolveOidcRoleMapping,
+  splitList,
 } from '#server/utils/oidcSettings';
 import { getDefaultEndpointUrl } from '#server/utils/oidcSetup';
 
@@ -16,10 +21,12 @@ import { getDefaultEndpointUrl } from '#server/utils/oidcSetup';
 export default definePermissionEventHandler(
   'admin',
   'any',
-  async ({ event }) => {
+  async ({ event, user }) => {
     const env = getOidcEnv();
+    const roleEnv = getOidcRoleEnv();
     const row = await Database.oidcSettings.get();
     const effective = resolveOidcConfig(env, row);
+    const roleMapping = resolveOidcRoleMapping(roleEnv, row);
 
     return {
       db: {
@@ -33,6 +40,9 @@ export default definePermissionEventHandler(
         appScopes: row?.appScopes ?? null,
         appRedirectUri: row?.appRedirectUri ?? null,
         endpointUrl: row?.endpointUrl ?? null,
+        adminGroups: row?.adminGroups ?? null,
+        groupsClaim: row?.groupsClaim ?? null,
+        panelScopes: row?.panelScopes ?? null,
       },
       env: {
         enabled: env.enabled,
@@ -40,12 +50,19 @@ export default definePermissionEventHandler(
         server: env.server || null,
         clientId: env.clientId || null,
         hasClientSecret: !!env.clientSecret,
+        adminGroups: roleEnv.adminGroups
+          ? splitList(roleEnv.adminGroups)
+          : null,
+        groupsClaim: roleEnv.groupsClaim || null,
+        panelScopes: roleEnv.panelScopes || null,
       },
       defaults: {
         friendlyName: DEFAULT_OIDC_NAME,
         appScopes: DEFAULT_APP_SCOPES.join(' '),
         appRedirectUri: DEFAULT_APP_REDIRECT_URI,
         endpointUrl: getDefaultEndpointUrl(event),
+        groupsClaim: DEFAULT_GROUPS_CLAIM,
+        panelScopes: DEFAULT_PANEL_SCOPES.join(' '),
       },
       effective: {
         enabled: effective.enabled,
@@ -59,8 +76,23 @@ export default definePermissionEventHandler(
         appScopes: effective.app.scopes.join(' '),
         appRedirectUri: effective.app.redirectUri,
         endpointUrl: effective.app.endpointUrl ?? getDefaultEndpointUrl(event),
+        adminGroups: roleMapping.adminGroups,
+        groupsClaim: roleMapping.groupsClaim,
+        panelScopes: roleMapping.panelScopes.join(' '),
       },
-      sources: effective.sources,
+      sources: { ...effective.sources, ...roleMapping.sources },
+      /** groups received on the last OIDC login of the current admin */
+      self:
+        user.oauthProvider === 'oidc'
+          ? {
+              groups: user.oidcGroups,
+              matched: user.oidcGroups
+                ? matchAdminGroups(user.oidcGroups, roleMapping.adminGroups)
+                : [],
+              roleSource: user.roleSource,
+              lastLoginAt: user.lastLoginAt,
+            }
+          : null,
     };
   }
 );

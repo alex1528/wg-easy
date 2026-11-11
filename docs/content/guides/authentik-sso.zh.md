@@ -20,7 +20,7 @@ English version: [Authentik SSO](./authentik-sso.md)
 - 能访问 Authentik 管理界面（`https://auth.example.com/if/admin/`）。
 - 至少有一个可用的 wg-easy 管理员账号（用于开启 OIDC 以及绑定账号）。
 
-wg-easy 使用标准 OIDC：PKCE、`openid email profile` 作用域，客户端认证方式为 `client_secret_post`。这些 Authentik 原生支持。
+wg-easy 使用标准 OIDC：PKCE、`openid email profile` 作用域，客户端认证方式为 `client_secret_post`。这些 Authentik 原生支持。管理员权限可以通过 Authentik 的组来授予（本文使用 `wg-admins`，见第 6 步）。
 
 ## 总览：两个 OIDC 客户端
 
@@ -151,6 +151,7 @@ https://auth.example.com/application/o/wg-easy/
 | Issuer/Server | `https://auth.example.com/application/o/wg-easy/` |
 | Client ID     | `<client-id>`                                     |
 | Client Secret | `<client-secret>`                                 |
+| 管理员组      | `wg-admins`（「角色映射」分组，见第 6 步）         |
 
 改动即时生效。面板会在 **Redirect URI** 处显示它期望的两个回调地址——和第 2 步核对一遍。留空的字段会回退到 `OAUTH_OIDC_*` 环境变量；密钥是只写的（存进 SQLite 数据库后不再回显）。完整字段说明见[管理面板的 OIDC 设置](./livewireguard.md#oidc-settings-in-the-admin-panel)。
 
@@ -163,6 +164,7 @@ environment:
     - OAUTH_OIDC_SERVER=https://auth.example.com/application/o/wg-easy/
     - OAUTH_OIDC_CLIENT_ID=<client-id>
     - OAUTH_OIDC_CLIENT_SECRET=<client-secret>
+    - OAUTH_OIDC_ADMIN_GROUPS=wg-admins
 ```
 
 可选加固项：
@@ -176,7 +178,7 @@ environment:
 
 /// warning | 自动注册
 
-`OAUTH_AUTO_REGISTER` 建出的账号带管理员权限（权限系统尚未实现）。只有当允许使用该 Authentik 应用的所有用户都可以管理 wg-easy 时才开启；否则请保持关闭，按下文手动绑定账号。
+`OAUTH_AUTO_REGISTER` 会在首次登录时自动建号。新账号是普通用户，只有管理员组（`wg-admins`，见第 6 步）的成员才是管理员。所有能使用该 Authentik 应用的用户都可以登录并创建自己的 VPN 客户端，如有需要请在第 3 步限制应用的访问，或设置 `OAUTH_ALLOWED_DOMAINS`。
 
 ///
 
@@ -202,7 +204,74 @@ environment:
 
 验证：登出后，登录页会出现 **Authentik** 按钮，点击后无需输入密码即可回到面板。
 
-## 第 6 步 — LiveWireGuard App 客户端（可选）
+## 第 6 步 — 用 `wg-admins` 组授予管理员权限
+
+wg-easy 有两种角色：**管理员**可以管理所有用户、客户端和系统配置；**普通用户**只能查看和管理自己的客户端（见[用户与角色](./users-and-roles.md)）。管理员角色可以通过 Authentik 的组来分配，本文使用的组是 **`wg-admins`**。
+
+### 在 Authentik 中创建组
+
+1. 管理界面 → **Directory** → **Groups** → **Create**（目录 → 组 → 创建）。
+2. Name 填 `wg-admins`，其余保持默认，保存。
+3. 打开该组 → **Users** → **Add existing user**，把需要管理 wg-easy 的人都加进来。
+
+不需要额外的属性映射或作用域：第 2 步给面板 Provider 挂的 `authentik default OpenID Mapping: profile` 已经会下发 `groups` 声明，内容是用户**直接所属**的组名。请把用户**直接**加入 `wg-admins`，子组成员不会出现在列表里。
+
+### 配置 wg-easy
+
+在 **管理面板 → OIDC → 角色映射** 中填写：
+
+| 字段            | 值                                         |
+| --------------- | ------------------------------------------ |
+| 管理员组        | `wg-admins`（可以再加其他组，命中任意一个即可） |
+| 组 Claim        | 留空（默认 `groups`）                       |
+| 面板登录 Scopes | 留空（默认 `openid email profile`）         |
+
+或者用环境变量：
+
+```yaml
+environment:
+    - OAUTH_OIDC_ADMIN_GROUPS=wg-admins
+```
+
+多个组用逗号分隔（`wg-admins,ops`），组名区分大小写。面板中保存的值优先于环境变量。
+
+### 角色如何分配
+
+用户通过 Authentik 登录时计算角色：
+
+| 用户                                                         | 结果                                                                         |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| 新用户（由 `OAUTH_AUTO_REGISTER` 创建）且在 `wg-admins` 中   | 管理员                                                                       |
+| 新用户，不在 `wg-admins` 中                                  | 普通用户                                                                     |
+| 角色由 OIDC 组管理的已有用户                                 | 每次登录重新计算：加入 `wg-admins` 后升为管理员，移出后降为普通用户         |
+| 角色是手动设置的用户（管理面板 → 用户、初始化向导、CLI）     | 不变。可在 管理面板 → 用户 中点「恢复由 OIDC 组管理」重新交给组决定         |
+| 绑定了 Authentik 的本地账号（第 5 步）                       | 保持原角色（手动），例如初始管理员即使不在 `wg-admins` 中也仍是管理员 |
+| 令牌中没有 `groups` 声明                                     | 不改变角色，并记录告警日志                                                   |
+
+任何情况下都至少保留一个启用的管理员：最后一个管理员不会被降级。
+
+/// warning | 下次登录才生效
+
+在 Authentik 中添加或移除成员，要等该用户下次登录 wg-easy 时才生效。如需立即收回管理员权限，请同时在 **管理面板 → 用户** 中点「设为普通用户」（或「禁用」）。
+
+在 wg-easy 中修改管理员组后，可点 **管理面板 → OIDC → 立即重新计算角色**，按每个用户最近一次登录的组，对所有由 OIDC 组管理的用户重新计算。
+
+///
+
+/// note | 从旧版本升级
+
+旧版本通过自动注册创建的用户都是管理员，且角色由 OIDC 组管理。配置 `wg-admins` 后，不在该组中的用户会在下次登录时变为普通用户。在配置管理员组之前，用户页面会一直显示提示。
+
+///
+
+### 验证
+
+1. 用 `wg-admins` 组的成员通过 **Authentik** 登录。
+2. **管理面板 → OIDC → 角色映射 → 自检** 会列出你最近一次登录收到的组，`wg-admins` 被高亮。
+3. **管理面板 → 用户** 中该用户显示为 **管理员**，来源为 **OIDC 组**；点「查看组」可以看到 Authentik 下发的组。
+4. 用不在 `wg-admins` 中的用户登录：看不到管理面板，只能看到自己的客户端。
+
+## 第 7 步 — LiveWireGuard App 客户端（可选）
 
 如果使用 LiveWireGuard App，再注册**第二个** Provider 作为公共客户端：
 
@@ -234,3 +303,5 @@ App 侧的详细说明见 [LiveWireGuard 导入指南](./livewireguard.md)。
 | 令牌端点返回 `invalid_client`        | 密钥错误，或 Provider 建成了 Public 类型（公共客户端不能用密钥认证）。                                                 |
 | wg-easy 日志报 discovery/issuer 错误 | 配置的服务器地址与 discovery 的 issuer 不一致。使用 Provider 的 OpenID Configuration URL 中的精确 issuer，含结尾斜杠。 |
 | App 无法保持登录                     | App 的 Provider 缺少 `offline_access` 作用域映射，Authentik 没有签发刷新令牌。                                         |
+| 在 `wg-admins` 中却不是管理员        | 重新登录一次（角色在登录时计算）。确认用户是该组的直接成员、角色没有被手动设置过（管理面板 → 用户），并且 `wg-admins` 已保存为管理员组。 |
+| 自检里没有组                         | 面板 Provider 没有挂 `authentik default OpenID Mapping: profile` 映射，因此没有 `groups` 声明。                         |

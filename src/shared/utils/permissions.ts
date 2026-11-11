@@ -17,6 +17,13 @@ export const roles = {
 type Roles = keyof typeof roles;
 
 /**
+ * where the role of a user comes from
+ * - manual: setup / admin panel / CLI, never changed by OIDC group sync
+ * - oidc: recalculated from the OIDC groups on every OIDC login
+ */
+export type RoleSource = 'manual' | 'oidc';
+
+/**
  * convert role to key
  * @example roleToKey(roles.ADMIN) => 'ADMIN'
  */
@@ -49,7 +56,13 @@ type SharedUserType =
 
 export type SharedPublicUser = Pick<
   UserType,
-  'id' | 'username' | 'name' | 'email' | 'totpVerified' | 'oauthProvider'
+  | 'id'
+  | 'username'
+  | 'name'
+  | 'email'
+  | 'totpVerified'
+  | 'oauthProvider'
+  | 'roleSource'
 > & { role: BrandedNumber; hasPassword: boolean };
 
 type PermissionCheck<Key extends keyof Permissions> =
@@ -67,7 +80,23 @@ type RolesWithPermissions = {
 export type Permissions = {
   clients: {
     dataType: Pick<ClientType, 'id' | 'userId'>;
-    action: 'view' | 'create' | 'update' | 'delete' | 'custom';
+    /**
+     * - update: name only
+     * - updateAdvanced: addresses, allowed ips, firewall, dns, mtu, awg, hooks, expiry
+     * - toggle: enable / disable
+     */
+    action:
+      | 'view'
+      | 'create'
+      | 'update'
+      | 'updateAdvanced'
+      | 'toggle'
+      | 'delete'
+      | 'custom';
+  };
+  users: {
+    dataType: never;
+    action: 'view' | 'update';
   };
   admin: {
     dataType: never;
@@ -85,8 +114,14 @@ export const ROLES = {
       view: true,
       create: true,
       update: true,
+      updateAdvanced: true,
+      toggle: true,
       delete: true,
       custom: true,
+    },
+    users: {
+      view: true,
+      update: true,
     },
     admin: {
       any: true,
@@ -100,8 +135,14 @@ export const ROLES = {
       view: (user, client) => user.id === client.userId,
       create: false,
       update: (user, client) => user.id === client.userId,
+      updateAdvanced: false,
+      toggle: false,
       delete: (user, client) => user.id === client.userId,
       custom: true,
+    },
+    users: {
+      view: false,
+      update: false,
     },
     admin: {
       any: false,

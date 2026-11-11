@@ -24,6 +24,18 @@ export class OidcSettingsService {
     return result ?? null;
   }
 
+  /**
+   * LiveWireGuard endpoint url handed to the app (setup QR code)
+   * @param endpointUrl null = derive from the request host
+   */
+  async updateEndpointUrl(endpointUrl: string | null) {
+    await this.#db
+      .insert(oidcSettings)
+      .values({ id: ROW_ID, endpointUrl })
+      .onConflictDoUpdate({ target: oidcSettings.id, set: { endpointUrl } })
+      .execute();
+  }
+
   async update(data: OidcSettingsUpdateType) {
     // secrets: undefined means "keep the stored value"
     const values: Partial<typeof oidcSettings.$inferInsert> = {
@@ -38,6 +50,16 @@ export class OidcSettingsService {
     };
     if (data.clientSecret !== undefined) {
       values.clientSecret = data.clientSecret;
+    }
+    // role mapping: undefined means "keep the stored value"
+    if (data.adminGroups !== undefined) {
+      values.adminGroups = data.adminGroups;
+    }
+    if (data.groupsClaim !== undefined) {
+      values.groupsClaim = data.groupsClaim;
+    }
+    if (data.panelScopes !== undefined) {
+      values.panelScopes = data.panelScopes;
     }
     if (data.appClientSecret !== undefined) {
       values.appClientSecret = data.appClientSecret;

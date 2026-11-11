@@ -82,6 +82,20 @@ export const ClientCreateSchema = z.object({
 
 export type ClientCreateType = z.infer<typeof ClientCreateSchema>;
 
+/** admin panel: optional owner (default: the logged in admin) */
+export const ClientCreateWithOwnerSchema = ClientCreateSchema.extend({
+  userId: z
+    .number({ message: t('zod.user.id') })
+    .int({ message: t('zod.user.id') })
+    .positive({ message: t('zod.user.id') })
+    .optional(),
+});
+
+/** fields a non admin user can change on their own clients */
+export const ClientSelfUpdateSchema = z.object({
+  name: name,
+});
+
 const filter = z.string().pipe(safeStringRefine);
 
 const sort = z.enum(['asc', 'desc']);

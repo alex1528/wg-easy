@@ -8,11 +8,19 @@
       "config": "网络配置",
       "interface": "接口配置",
       "hooks": "钩子脚本",
-      "oidc": "OIDC"
+      "oidc": "OIDC",
+      "users": "用户管理"
     }
   },
   "user": {
-    "email": "电子邮箱"
+    "email": "电子邮箱",
+    "role": "角色",
+    "roleAdmin": "管理员",
+    "roleClient": "普通用户",
+    "roleSourceOidc": "OIDC 组",
+    "roleSourceManual": "手动",
+    "roleSourceOidcDesc": "每次 OIDC 登录时根据所在组重新计算",
+    "roleSourceManualDesc": "手动设置，不随 OIDC 组变化"
   },
   "me": {
     "currentPassword": "当前密码",
@@ -21,7 +29,8 @@
     "2faKey": "TOTP密钥",
     "2faCodeDesc": "请输入您的认证器应用生成的验证码",
     "disable2fa": "禁用双重认证",
-    "disable2faDesc": "您需要输入当前密码来禁用双重认证功能"
+    "disable2faDesc": "您需要输入当前密码来禁用双重认证功能",
+    "role": "角色"
   },
   "general": {
     "name": "名称",
@@ -124,7 +133,13 @@
     "firewallIps": "防火墙允许的IP",
     "firewallIpsDesc": "客户端可访问的目标 IP/CIDR 范围（由服务器端进行限制）。留空时将使用 服务端允许的IP 设置。支持按 端口 和 协议 进行过滤。具体语法请查看文档。",
     "downloadPng": "下载图片",
-    "copyPng": "复制图片"
+    "copyPng": "复制图片",
+    "owner": "所属用户",
+    "ownerSelf": "我",
+    "ownerDesc": "客户端归属的用户",
+    "readOnlyAdvanced": "地址、Allowed IPs、防火墙、DNS、MTU、AmneziaWG 和钩子脚本等设置仅管理员可修改。",
+    "setByAdmin": "由管理员设置",
+    "liveWireGuardDevice": "通过 LiveWireGuard 接入（密钥对保存在设备上）"
   },
   "dialog": {
     "change": "修改",
@@ -135,7 +150,8 @@
     "success": "操作成功",
     "saved": "保存成功",
     "error": "发生错误",
-    "unknown": "未知错误。查看控制台获取更详细信息"
+    "unknown": "未知错误。查看控制台获取更详细信息",
+    "permissionChanged": "你的权限已变更"
   },
   "form": {
     "actions": "操作",
@@ -145,7 +161,8 @@
     "sectionAdvanced": "高级选项",
     "noItems": "未配置",
     "nullNoItems": "未配置。将使用全局配置",
-    "add": "添加"
+    "add": "添加",
+    "editFallbackHint": "点击输入框可在此基础上修改"
   },
   "admin": {
     "general": {
@@ -157,7 +174,19 @@
       "json": "JSON格式",
       "jsonDesc": "获取JSON格式的监控数据路由",
       "prometheus": "Prometheus格式",
-      "prometheusDesc": "获取Prometheus格式监控数据的路由"
+      "prometheusDesc": "获取Prometheus格式监控数据的路由",
+      "liveWireGuard": "LiveWireGuard",
+      "liveWireGuardEnabled": "启用 LiveWireGuard 接口",
+      "liveWireGuardEnabledDesc": "允许 LiveWireGuard 客户端通过 OIDC 拉取配置（GET /api/livewireguard/config）",
+      "liveWireGuardAudience": "Audience",
+      "liveWireGuardAudienceDesc": "LiveWireGuard App token 的预期 audience（OIDC client id）",
+      "liveWireGuardEndpoint": "接口地址",
+      "liveWireGuardEndpointDesc": "交给 LiveWireGuard App 的配置接口地址（同时写入接入二维码）。留空 = 按当前访问域名自动生成。服务端路径固定为 /api/livewireguard/config，自定义地址需能访问到该路径（例如经反向代理转发）。与 管理面板 → OIDC 中的 Endpoint 地址 是同一个设置。",
+      "liveWireGuardStatus": "当前状态",
+      "liveWireGuardStatusDesc": "已保存的 LiveWireGuard 接口状态",
+      "liveWireGuardStatusOn": "已启用",
+      "liveWireGuardStatusOff": "未启用",
+      "unsaved": "有未保存的修改，点击「保存」后生效"
     },
     "config": {
       "connection": "连接设置",
@@ -215,7 +244,7 @@
       "appRedirectUri": "App 回调地址",
       "appRedirectUriDesc": "App 的 Redirect URI，需要在身份提供方中登记",
       "endpointUrl": "Endpoint 地址",
-      "endpointUrlDesc": "LiveWireGuard 配置接口地址。留空 = 按当前访问域名生成",
+      "endpointUrlDesc": "LiveWireGuard 配置接口地址。留空 = 按当前访问域名生成。与 通用设置 → LiveWireGuard → 接口地址 是同一个设置",
       "preview": "接入二维码",
       "previewDesc": "二维码中的内容。其中包含 Client Secret，只应展示给可信用户。",
       "overridden": "已覆盖",
@@ -230,7 +259,77 @@
       "secretPlaceholder": "未保存",
       "secretWillSet": "保存后生效",
       "secretWillClear": "将被清除（回退到 .env）",
-      "secretStored": "已保存在数据库中"
+      "secretStored": "已保存在数据库中",
+      "roleMapping": "角色映射",
+      "roleMappingDesc": "根据身份提供方返回的组，自动为 OIDC 用户分配管理员角色",
+      "adminGroups": "管理员组",
+      "adminGroupsDesc": "属于其中任意一个组即为管理员（OAUTH_OIDC_ADMIN_GROUPS）。区分大小写，忽略开头的 /。Entra ID 返回的是组 Object ID",
+      "adminGroupsEnv": "未设置，使用 .env 中的值：{groups}",
+      "adminGroupsNone": "未设置。角色映射未启用：OIDC 用户保持原角色，新用户为普通用户",
+      "groupsClaim": "组 Claim",
+      "groupsClaimDesc": "包含组信息的 claim（OAUTH_OIDC_GROUPS_CLAIM），支持 realm_access.roles 这样的嵌套路径",
+      "panelScopes": "面板登录 Scopes",
+      "panelScopesDesc": "面板登录时申请的 scope（OAUTH_OIDC_SCOPES）。部分身份提供方（如 Okta）需要额外加 groups，必须包含 openid",
+      "rules": "规则",
+      "rule1": "OIDC 新用户：属于管理员组为管理员，否则为普通用户",
+      "rule2": "由 OIDC 组管理的用户：每次 OIDC 登录重新计算，可能升级也可能降级",
+      "rule3": "手动设置过角色的用户：不受组变化影响",
+      "rule4": "token 中没有组 claim 时：不改变角色",
+      "rule5": "任何情况下都至少保留一个启用的管理员",
+      "selfCheck": "自检",
+      "selfGroups": "你最近一次 OIDC 登录收到的组",
+      "selfNoGroups": "你最近一次 OIDC 登录没有收到组信息，请检查组 Claim 和 Scopes。",
+      "selfMatched": "命中管理员组：{groups}",
+      "selfNotMatched": "你不在管理员组中。你目前仍是管理员，是因为角色是手动设置的，或你是最后一个管理员。",
+      "resync": "立即重新计算角色",
+      "resyncDesc": "按已保存的管理员组，用每个用户最近一次登录的组，重新计算所有由 OIDC 组管理的用户的角色",
+      "resyncDone": "已更新 {changed} 个用户，跳过 {skipped} 个（最后一个管理员）"
+    },
+    "users": {
+      "desc": "面板的所有用户。管理员可以管理所有用户、客户端和系统配置；普通用户只能查看和管理自己的客户端。",
+      "total": "全部用户",
+      "admins": "管理员",
+      "clients": "普通用户",
+      "disabled": "已禁用",
+      "search": "搜索用户名、姓名、邮箱…",
+      "filterAll": "全部",
+      "filterAdmin": "管理员",
+      "filterClient": "普通用户",
+      "filterDisabled": "已禁用",
+      "empty": "没有找到用户",
+      "you": "你",
+      "statusEnabled": "启用",
+      "statusDisabled": "禁用",
+      "loginPassword": "密码",
+      "loginTotp": "已启用两步验证",
+      "clientCount": "{count} 个客户端",
+      "lastLogin": "最近登录：{date}",
+      "neverLoggedIn": "从未登录",
+      "promote": "设为管理员",
+      "demote": "设为普通用户",
+      "followOidc": "恢复由 OIDC 组管理",
+      "disable": "禁用",
+      "enable": "启用",
+      "promoteDesc": "{name} 将可以管理所有用户、客户端和系统配置。",
+      "demoteDesc": "{name} 将只能查看和管理自己的客户端，立即生效。",
+      "followOidcDesc": "{name} 的角色将在每次 OIDC 登录时根据所在组自动计算。",
+      "followOidcAdmin": "按最近一次登录的组（{groups}），{name} 将成为管理员。",
+      "followOidcClient": "按最近一次登录的组，{name} 不在管理员组中，将成为普通用户。",
+      "followOidcUnknown": "暂无组信息：在下次 OIDC 登录前保持当前角色。",
+      "disableDesc": "禁用后 {name} 将无法登录，名下的 VPN 客户端也会停止工作。可随时重新启用。",
+      "enableDesc": "{name} 将可以重新登录，名下的 VPN 客户端恢复工作。",
+      "manualNote": "手动设置后，此用户的角色不再随 OIDC 组变化，可随时恢复由 OIDC 组管理。",
+      "selfHint": "不能修改自己的账户",
+      "lastAdminHint": "至少需要保留一个启用的管理员",
+      "notOidcHint": "仅适用于关联了 OIDC 的用户",
+      "groups": "最近一次 OIDC 登录的组",
+      "noGroups": "尚未收到组信息",
+      "matched": "命中管理员组：{groups}",
+      "notMatched": "未命中管理员组",
+      "showGroups": "查看组",
+      "hideGroups": "收起",
+      "legacyAdmins": "有 {count} 个通过 OIDC 注册、由 OIDC 组管理的管理员，但尚未配置管理员组，因此他们会一直保持管理员。建议配置管理员组或手动调整其角色。",
+      "configureGroups": "配置管理员组"
     }
   },
   "zod": {
@@ -264,7 +363,9 @@
       "passwordMatch": "两次输入的密码必须一致",
       "totpEnable": "启用TOTP",
       "totpEnableTrue": "必须启用双重认证",
-      "totpCode": "验证码"
+      "totpCode": "验证码",
+      "id": "用户 ID",
+      "role": "角色必须是 ADMIN 或 CLIENT"
     },
     "userConfig": {
       "host": "服务器地址"
@@ -272,7 +373,10 @@
     "general": {
       "sessionTimeout": "会话超时",
       "metricsEnabled": "启用监控",
-      "metricsPassword": "监控密码"
+      "metricsPassword": "监控密码",
+      "liveWireGuardEnabled": "LiveWireGuard",
+      "liveWireGuardAudience": "LiveWireGuard Audience",
+      "liveWireGuardEndpointUrl": "LiveWireGuard 接口地址必须是合法的 http(s) URL"
     },
     "interface": {
       "cidr": "CIDR",
@@ -302,7 +406,10 @@
       "scopes": "Scopes",
       "scopesOpenid": "Scopes 必须包含 openid",
       "redirectUri": "回调地址必须是合法的 URI",
-      "endpointUrl": "Endpoint 地址必须是合法的 URL"
+      "endpointUrl": "Endpoint 地址必须是合法的 URL",
+      "adminGroups": "管理员组（最多 50 个，每个最长 256 个字符）",
+      "groupsClaim": "组 Claim 不能包含空格",
+      "panelScopes": "面板登录 Scopes"
     }
   },
   "hooks": {
@@ -361,13 +468,15 @@
     "setupOpen": "在 LiveWireGuard 中打开",
     "setupCopy": "复制链接",
     "setupCopied": "已复制",
-    "endpointDisabled": "LiveWireGuard Endpoint 未启用（管理面板 → 常规），App 将无法拉取配置。",
+    "endpointDisabled": "LiveWireGuard 接口未启用，App 将无法拉取配置。",
     "oidcNotConfigured": "未配置 OIDC",
     "clientTitle": "WireGuard 配置",
     "clientDisabled": "此客户端已禁用",
     "noClient": "你还没有客户端",
     "generate": "生成",
     "regenerate": "重新生成",
-    "regenerateDesc": "将新建一个使用新密钥的客户端并显示在这里。旧客户端会保留，可以在下方列表中删除。"
+    "regenerateDesc": "将新建一个使用新密钥的客户端并显示在这里。旧客户端会保留，可以在下方列表中删除。",
+    "endpointEnable": "前往 管理面板 → 通用设置 启用",
+    "endpointAskAdmin": "请联系管理员启用。"
   }
 }

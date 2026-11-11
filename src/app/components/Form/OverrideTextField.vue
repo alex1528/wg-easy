@@ -15,17 +15,22 @@
       type="text"
       autocomplete="off"
       :placeholder="fallback ?? ''"
+      @focus="onFocus"
+      @blur="onBlur"
     />
     <div
       class="flex items-center gap-2 text-xs text-gray-500 dark:text-neutral-400"
     >
-      <span v-if="data">{{ $t('admin.oidc.overridden') }}</span>
+      <span v-if="isOverridden">{{ $t('admin.oidc.overridden') }}</span>
       <span v-else-if="fallback">
         {{ fallbackLabel }}
+        <template v-if="prefillFallback">
+          · {{ $t('form.editFallbackHint') }}
+        </template>
       </span>
       <span v-else>{{ $t('form.nullNotSet') }}</span>
       <button
-        v-if="data"
+        v-if="isOverridden"
         type="button"
         class="underline hover:text-red-800"
         @click="data = null"
@@ -46,6 +51,11 @@ const props = defineProps<{
   /** 'env' or 'default' */
   fallbackSource?: 'env' | 'default';
   resetLabel?: string;
+  /**
+   * put the fallback into the empty input on focus, so it can be edited
+   * instead of retyped. Left unchanged, the field stays empty (not set).
+   */
+  prefillFallback?: boolean;
 }>();
 
 const { t } = useI18n();
@@ -62,4 +72,29 @@ const data = defineModel<string | null>({
     return temp === '' ? null : temp;
   },
 });
+
+/** a value equal to the fallback is not an override while prefilling */
+const isOverridden = computed(
+  () =>
+    !!data.value && !(props.prefillFallback && data.value === props.fallback)
+);
+
+async function onFocus(e: FocusEvent) {
+  if (!props.prefillFallback || data.value || !props.fallback) return;
+  data.value = props.fallback;
+  // caret at the end, ready to edit
+  await nextTick();
+  const input = e.target as HTMLInputElement | null;
+  if (input && document.activeElement === input) {
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }
+}
+
+function onBlur() {
+  // unchanged: keep following the fallback (env / default)
+  if (props.prefillFallback && data.value === props.fallback) {
+    data.value = null;
+  }
+}
 </script>

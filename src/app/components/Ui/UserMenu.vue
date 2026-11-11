@@ -20,6 +20,24 @@
           <div class="px-4 py-2">
             <div class="truncate">{{ authStore.userData?.name }}</div>
             <div class="truncate">@{{ authStore.userData?.username }}</div>
+            <div v-if="authStore.userData" class="mt-1 flex flex-wrap gap-1">
+              <span
+                class="rounded px-1.5 py-0.5 text-xs font-semibold"
+                :class="
+                  isAdmin
+                    ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300'
+                    : 'bg-gray-100 text-gray-700 dark:bg-neutral-600 dark:text-neutral-200'
+                "
+              >
+                {{ isAdmin ? $t('user.roleAdmin') : $t('user.roleClient') }}
+              </span>
+              <span
+                v-if="authStore.userData.roleSource === 'oidc'"
+                class="rounded border border-dashed border-gray-300 px-1.5 py-0.5 text-xs text-gray-500 dark:border-neutral-500 dark:text-neutral-400"
+              >
+                {{ $t('user.roleSourceOidc') }}
+              </span>
+            </div>
           </div>
         </DropdownMenuItem>
         <DropdownMenuItem>
@@ -68,6 +86,7 @@
 <script setup lang="ts">
 const authStore = useAuthStore();
 const toggleState = ref(false);
+const isAdmin = usePermission('admin', 'any');
 
 const _submit = useSubmit(
   (data) =>

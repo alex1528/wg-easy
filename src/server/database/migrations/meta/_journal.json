@@ -92,6 +92,13 @@
       "when": 1793781574070,
       "tag": "0012_client_is_default",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1794362847683,
+      "tag": "0013_user_roles",
+      "breakpoints": true
     }
   ]
 }

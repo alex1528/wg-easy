@@ -18,6 +18,12 @@ export const oidcSettings = sqliteTable('oidc_settings_table', {
   appScopes: text('app_scopes'),
   appRedirectUri: text('app_redirect_uri'),
   endpointUrl: text('endpoint_url'),
+  /** OIDC groups that grant the admin role (JSON array) */
+  adminGroups: text('admin_groups', { mode: 'json' }).$type<string[]>(),
+  /** claim name or dotted path containing the groups */
+  groupsClaim: text('groups_claim'),
+  /** space separated scopes requested by the panel login */
+  panelScopes: text('panel_scopes'),
   createdAt: text('created_at')
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)`),

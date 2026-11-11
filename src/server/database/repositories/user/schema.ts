@@ -3,7 +3,7 @@ import { int, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 import { client } from '../client/schema';
 
-import type { Role } from '#shared/utils/permissions';
+import type { Role, RoleSource } from '#shared/utils/permissions';
 import type { OAUTH_PROVIDER } from '#server/utils/oauth';
 
 export const user = sqliteTable(
@@ -16,6 +16,13 @@ export const user = sqliteTable(
     email: text().unique(),
     name: text().notNull(),
     role: int().$type<Role>().notNull(),
+    roleSource: text('role_source')
+      .$type<RoleSource>()
+      .notNull()
+      .default('manual'),
+    /** groups received on the last OIDC login, null = never received */
+    oidcGroups: text('oidc_groups', { mode: 'json' }).$type<string[]>(),
+    lastLoginAt: text('last_login_at'),
     totpKey: text('totp_key'),
     totpVerified: int('totp_verified', { mode: 'boolean' }).notNull(),
     enabled: int({ mode: 'boolean' }).notNull(),

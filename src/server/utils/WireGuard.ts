@@ -61,7 +61,8 @@ class WireGuard {
     );
 
     for (const client of clients) {
-      if (!client.enabled) {
+      // disabled clients and clients of disabled users have no peer
+      if (!client.enabled || client.user?.enabled === false) {
         continue;
       }
       result.push(

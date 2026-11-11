@@ -56,5 +56,7 @@ export default defineEventHandler(async (event) => {
     oauth_verifier: undefined,
   });
 
+  await Database.users.recordLogin(pendingLogin.userId);
+
   return { status: 'success' as const };
 });

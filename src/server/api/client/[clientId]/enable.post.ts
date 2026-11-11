@@ -8,7 +8,7 @@ import { ClientGetSchema } from '#db/repositories/client/types';
 
 export default definePermissionEventHandler(
   'clients',
-  'update',
+  'toggle',
   async ({ event, checkPermissions }) => {
     const { clientId } = await getValidatedRouterParams(
       event,

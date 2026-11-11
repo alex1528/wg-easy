@@ -55,10 +55,18 @@
               </div>
               <p
                 v-if="!data.setup.endpointEnabled"
-                class="flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400"
+                class="flex flex-wrap items-center justify-center gap-1 text-sm text-amber-600 dark:text-amber-400"
               >
                 <IconsWarning class="size-4 shrink-0" />
                 {{ $t('connect.endpointDisabled') }}
+                <NuxtLink
+                  v-if="isAdmin"
+                  to="/admin/general"
+                  class="underline hover:text-red-800"
+                >
+                  {{ $t('connect.endpointEnable') }}
+                </NuxtLink>
+                <span v-else>{{ $t('connect.endpointAskAdmin') }}</span>
               </p>
             </template>
             <div v-else :class="placeholderClass">
@@ -151,6 +159,7 @@
 type ConnectData = Awaited<ReturnType<typeof fetchConnect>>;
 
 const clientsStore = useClientsStore();
+const isAdmin = usePermission('admin', 'any');
 
 const placeholderClass =
   'flex size-52 items-center justify-center rounded border-2 border-dashed border-gray-200 bg-gray-50 p-4 text-sm text-gray-400 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-400';

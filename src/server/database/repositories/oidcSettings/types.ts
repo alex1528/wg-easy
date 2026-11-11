@@ -4,7 +4,7 @@ import z from 'zod';
 import type { oidcSettings } from './schema';
 
 import { controlStringRefine, safeStringRefine, t } from '#server/utils/types';
-import { splitScopes } from '#server/utils/oidcSettings';
+import { normalizeList, splitScopes } from '#server/utils/oidcSettings';
 
 export type OidcSettingsType = InferSelectModel<typeof oidcSettings>;
 
@@ -93,6 +93,49 @@ const redirectUri = z.preprocess(
     .nullable()
 );
 
+/** undefined = keep, null / [] = fall back to env */
+const adminGroups = z
+  .array(
+    z
+      .string({ message: t('zod.oidc.adminGroups') })
+      .max(256, { message: t('zod.oidc.adminGroups') })
+      .pipe(controlStringRefine),
+    { message: t('zod.oidc.adminGroups') }
+  )
+  .max(50, { message: t('zod.oidc.adminGroups') })
+  .transform((v) => {
+    const groups = normalizeList(v);
+    return groups.length === 0 ? null : groups;
+  })
+  .nullable()
+  .optional();
+
+const groupsClaim = z.preprocess(
+  emptyToNull,
+  z
+    .string({ message: t('zod.oidc.groupsClaim') })
+    .max(256, { message: t('zod.oidc.groupsClaim') })
+    .regex(/^\S+$/, { message: t('zod.oidc.groupsClaim') })
+    .pipe(controlStringRefine)
+    .pipe(safeStringRefine)
+    .nullable()
+    .optional()
+);
+
+const panelScopes = z.preprocess(
+  emptyToNull,
+  z
+    .string({ message: t('zod.oidc.panelScopes') })
+    .max(1024, { message: t('zod.oidc.panelScopes') })
+    .pipe(controlStringRefine)
+    .refine((v) => splitScopes(v).includes('openid'), {
+      message: t('zod.oidc.scopesOpenid'),
+    })
+    .transform((v) => normalizeList(splitScopes(v)).join(' '))
+    .nullable()
+    .optional()
+);
+
 export const OidcSettingsUpdateSchema = z.object({
   enabled: z.boolean({ message: t('zod.oidc.enabled') }).nullable(),
   friendlyName: optionalText(t('zod.oidc.friendlyName')),
@@ -104,6 +147,9 @@ export const OidcSettingsUpdateSchema = z.object({
   appScopes: scopes,
   appRedirectUri: redirectUri,
   endpointUrl: optionalUrl(t('zod.oidc.endpointUrl')),
+  adminGroups: adminGroups,
+  groupsClaim: groupsClaim,
+  panelScopes: panelScopes,
 });
 
 export type OidcSettingsUpdateType = z.infer<typeof OidcSettingsUpdateSchema>;

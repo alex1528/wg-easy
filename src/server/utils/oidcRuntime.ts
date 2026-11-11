@@ -7,8 +7,11 @@
 import Database from '#server/utils/Database';
 import {
   resolveOidcConfig,
+  resolveOidcRoleMapping,
   type EffectiveOidcConfig,
   type OidcEnv,
+  type OidcRoleEnv,
+  type OidcRoleMapping,
 } from '#server/utils/oidcSettings';
 
 /** OIDC values from the environment (read raw, not filtered by WG_ENV) */
@@ -22,6 +25,20 @@ export function getOidcEnv(): OidcEnv {
     clientId: process.env.OAUTH_OIDC_CLIENT_ID,
     clientSecret: process.env.OAUTH_OIDC_CLIENT_SECRET,
   };
+}
+
+/** role mapping values from the environment */
+export function getOidcRoleEnv(): OidcRoleEnv {
+  return {
+    adminGroups: process.env.OAUTH_OIDC_ADMIN_GROUPS,
+    groupsClaim: process.env.OAUTH_OIDC_GROUPS_CLAIM,
+    panelScopes: process.env.OAUTH_OIDC_SCOPES,
+  };
+}
+
+export async function getEffectiveOidcRoleMapping(): Promise<OidcRoleMapping> {
+  const row = await Database.oidcSettings.get();
+  return resolveOidcRoleMapping(getOidcRoleEnv(), row);
 }
 
 export async function getEffectiveOidcConfig(): Promise<EffectiveOidcConfig> {

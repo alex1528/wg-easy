@@ -16,6 +16,8 @@ export const DEFAULT_APP_SCOPES = [
 ];
 export const DEFAULT_APP_REDIRECT_URI =
   'com.wuxichaorongtechnologycoltd.livewireguard:/oidc/callback';
+export const DEFAULT_GROUPS_CLAIM = 'groups';
+export const DEFAULT_PANEL_SCOPES = ['openid', 'email', 'profile'];
 export const SETUP_PAYLOAD_TYPE = 'livewireguard-setup';
 export const SETUP_PAYLOAD_VERSION = 1;
 
@@ -95,6 +97,97 @@ export function splitScopes(value: string) {
     .split(/[\s,]+/)
     .map((v) => v.trim())
     .filter((v) => v.length > 0);
+}
+
+/** trim, drop empty values and duplicates (keeps the first occurrence) */
+export function normalizeList(values: readonly unknown[]): string[] {
+  const result: string[] = [];
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (trimmed !== '' && !result.includes(trimmed)) {
+      result.push(trimmed);
+    }
+  }
+  return result;
+}
+
+/** comma separated list, e.g. `OAUTH_OIDC_ADMIN_GROUPS=wg-admins,ops` */
+export function splitList(value: string) {
+  return normalizeList(value.split(','));
+}
+
+export type OidcRoleEnv = {
+  /** comma separated (OAUTH_OIDC_ADMIN_GROUPS) */
+  adminGroups?: string;
+  /** OAUTH_OIDC_GROUPS_CLAIM */
+  groupsClaim?: string;
+  /** space or comma separated (OAUTH_OIDC_SCOPES) */
+  panelScopes?: string;
+};
+
+export type OidcRoleDbRow = {
+  adminGroups?: string[] | null;
+  groupsClaim?: string | null;
+  panelScopes?: string | null;
+};
+
+export type OidcRoleMapping = {
+  /** empty = role mapping disabled */
+  adminGroups: string[];
+  groupsClaim: string;
+  /** always contains openid */
+  panelScopes: string[];
+  sources: {
+    adminGroups: ValueSource;
+    groupsClaim: ValueSource;
+    panelScopes: ValueSource;
+  };
+};
+
+/**
+ * Role mapping settings: DB overrides with env fallback, then defaults.
+ */
+export function resolveOidcRoleMapping(
+  env: OidcRoleEnv,
+  db: OidcRoleDbRow | null
+): OidcRoleMapping {
+  let adminGroups: string[] = [];
+  let adminGroupsSource: ValueSource = 'none';
+  const dbGroups = Array.isArray(db?.adminGroups)
+    ? normalizeList(db.adminGroups)
+    : [];
+  if (dbGroups.length > 0) {
+    adminGroups = dbGroups;
+    adminGroupsSource = 'db';
+  } else if (env.adminGroups) {
+    const envGroups = splitList(env.adminGroups);
+    if (envGroups.length > 0) {
+      adminGroups = envGroups;
+      adminGroupsSource = 'env';
+    }
+  }
+
+  const [claim, claimSource] = pick(db?.groupsClaim, env.groupsClaim);
+
+  const [scopesValue, scopesSource] = pick(db?.panelScopes, env.panelScopes);
+  let panelScopes = scopesValue
+    ? normalizeList(splitScopes(scopesValue))
+    : [...DEFAULT_PANEL_SCOPES];
+  if (!panelScopes.includes('openid')) {
+    panelScopes = ['openid', ...panelScopes];
+  }
+
+  return {
+    adminGroups,
+    groupsClaim: claim ?? DEFAULT_GROUPS_CLAIM,
+    panelScopes,
+    sources: {
+      adminGroups: adminGroupsSource,
+      groupsClaim: claim === null ? 'default' : claimSource,
+      panelScopes: scopesValue === null ? 'default' : scopesSource,
+    },
+  };
 }
 
 /**

@@ -1,5 +1,19 @@
 <template>
+  <span
+    v-if="!canToggle"
+    class="flex items-center gap-1 px-1 text-xs"
+    :title="$t('client.setByAdmin')"
+  >
+    <span
+      class="inline-block size-2 rounded-full"
+      :class="client.enabled ? 'bg-green-500' : 'bg-gray-400'"
+    />
+    {{
+      client.enabled ? $t('client.enabled') : $t('admin.users.statusDisabled')
+    }}
+  </span>
   <BaseSwitch
+    v-else
     :model-value="enabled"
     :title="
       client.enabled ? $t('client.disableClient') : $t('client.enableClient')
@@ -12,6 +26,8 @@
 const props = defineProps<{
   client: LocalClient;
 }>();
+
+const canToggle = usePermission('clients', 'toggle');
 
 const enabled = ref(props.client.enabled);
 

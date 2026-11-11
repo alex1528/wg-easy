@@ -20,7 +20,7 @@ Requirements:
 - Access to the Authentik admin interface (`https://auth.example.com/if/admin/`).
 - At least one working wg-easy admin account (needed to enable OIDC and to link accounts).
 
-wg-easy uses standard OIDC: PKCE, scopes `openid email profile` and client authentication via `client_secret_post`. Authentik supports all of this out of the box.
+wg-easy uses standard OIDC: PKCE, scopes `openid email profile` and client authentication via `client_secret_post`. Authentik supports all of this out of the box. Admin rights can be granted with an Authentik group (`wg-admins` in this guide, see [Step 6](#step-6-grant-admin-rights-with-the-wg-admins-group)).
 
 ## Overview: two OIDC clients
 
@@ -151,6 +151,7 @@ Open **Admin Panel → OIDC** and fill in:
 | Issuer/Server | `https://auth.example.com/application/o/wg-easy/` |
 | Client ID     | `<client-id>`                                     |
 | Client Secret | `<client-secret>`                                 |
+| Admin Groups  | `wg-admins` (section _Role Mapping_, see Step 6)  |
 
 Changes apply immediately. The panel shows the two redirect URIs it expects under **Redirect URI** — compare them with Step 2. Empty fields fall back to the `OAUTH_OIDC_*` environment variables, and secrets are write-only (they are stored in the SQLite database, never displayed again). See [OIDC settings in the admin panel](./livewireguard.md#oidc-settings-in-the-admin-panel) for the full field reference.
 
@@ -163,6 +164,7 @@ environment:
     - OAUTH_OIDC_SERVER=https://auth.example.com/application/o/wg-easy/
     - OAUTH_OIDC_CLIENT_ID=<client-id>
     - OAUTH_OIDC_CLIENT_SECRET=<client-secret>
+    - OAUTH_OIDC_ADMIN_GROUPS=wg-admins
 ```
 
 Optional hardening:
@@ -176,7 +178,7 @@ Optional hardening:
 
 /// warning | Auto registration
 
-`OAUTH_AUTO_REGISTER` creates accounts with admin permissions (the permission system is not implemented yet). Only enable it if every user in the allowed Authentik application may administer wg-easy; otherwise leave it off and link accounts manually as described below.
+`OAUTH_AUTO_REGISTER` creates an account on the first login. New accounts are normal users; only members of the admin groups (`wg-admins`, see [Step 6](#step-6-grant-admin-rights-with-the-wg-admins-group)) become admins. Every user allowed to use the Authentik application can still log in and create their own VPN client, so restrict the application (Step 3) or `OAUTH_ALLOWED_DOMAINS` if needed.
 
 ///
 
@@ -202,7 +204,74 @@ Matching works as follows:
 
 Verify: log out — the login page now shows an **Authentik** button, and signing in through it lands you back in the panel without entering a password.
 
-## Step 6 — The LiveWireGuard app client (optional)
+## Step 6 — Grant admin rights with the `wg-admins` group
+
+wg-easy has two roles: **admins** manage all users, clients and settings; **users** only see and manage their own clients (see [Users and Roles](./users-and-roles.md)). The admin role can be assigned through an Authentik group. This guide uses the group **`wg-admins`**.
+
+### Create the group in Authentik
+
+1. Admin interface → **Directory** → **Groups** → **Create**.
+2. Name: `wg-admins`. Leave everything else at the defaults and save.
+3. Open the group → **Users** → **Add existing user** and add everyone who should administer wg-easy.
+
+No extra property mapping or scope is needed: the `authentik default OpenID Mapping: profile` mapping assigned in [Step 2](#step-2-create-the-panel-provider-confidential-client) already sends a `groups` claim with the names of the groups the user is a direct member of. Add the users **directly** to `wg-admins`; membership of a child group is not listed.
+
+### Configure wg-easy
+
+Either in **Admin Panel → OIDC → Role Mapping**:
+
+| Field              | Value                                                       |
+| ------------------ | ----------------------------------------------------------- |
+| Admin Groups       | `wg-admins` (add more groups if needed, any of them counts) |
+| Groups Claim       | leave empty (default `groups`)                              |
+| Panel Login Scopes | leave empty (default `openid email profile`)                |
+
+or with an environment variable:
+
+```yaml
+environment:
+    - OAUTH_OIDC_ADMIN_GROUPS=wg-admins
+```
+
+Several groups are separated by commas (`wg-admins,ops`). Group names are case sensitive. Values saved in the panel override the environment.
+
+### How the role is assigned
+
+The role is calculated when a user logs in with Authentik:
+
+| User                                                                   | Result                                                                                          |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| New user (created by `OAUTH_AUTO_REGISTER`) in `wg-admins`             | Admin                                                                                           |
+| New user not in `wg-admins`                                            | User                                                                                            |
+| Existing user whose role follows the OIDC groups                       | Recalculated on every login: promoted when added to `wg-admins`, demoted when removed            |
+| User whose role was set manually (Admin Panel → Users, setup, CLI)     | Not changed. Use **Follow OIDC groups** in Admin Panel → Users to let the group decide again     |
+| Local account linked with Authentik ([Step 5](#step-5-link-accounts-and-first-login)) | Keeps its role (manual), e.g. the initial admin stays admin even without `wg-admins` |
+| Token without `groups` claim                                           | Role not changed, a warning is logged                                                           |
+
+There is always at least one enabled admin: the last one is never demoted.
+
+/// warning | Changes apply on the next login
+
+Adding or removing a user in Authentik takes effect the next time this user logs in to wg-easy. To revoke admin rights immediately, also click **Make user** (or **Disable**) in **Admin Panel → Users**.
+
+After changing the admin groups in wg-easy, **Admin Panel → OIDC → Recalculate roles now** applies them to every user following the OIDC groups, based on the groups of their last login.
+
+///
+
+/// note | Upgrading
+
+Users auto-registered by earlier versions were created as admins and follow the OIDC groups. Once `wg-admins` is configured, those not in the group become users on their next login. The users page shows a hint as long as no admin group is configured.
+
+///
+
+### Verify
+
+1. Log in through **Authentik** with a member of `wg-admins`.
+2. **Admin Panel → OIDC → Role Mapping → Self Check** lists the groups of your last login, `wg-admins` is highlighted.
+3. **Admin Panel → Users** shows the user as **Admin** with the source **OIDC groups**. _Show groups_ lists the groups received from Authentik.
+4. Log in with a user that is not in `wg-admins`: no admin panel, only their own clients.
+
+## Step 7 — The LiveWireGuard app client (optional)
 
 If you use the LiveWireGuard app, register a **second** provider as a public client:
 
@@ -234,3 +303,5 @@ Details on the app side are in the [LiveWireGuard Import guide](./livewireguard.
 | `invalid_client` from the token endpoint | Wrong secret, or the provider was created as a Public client (public clients cannot authenticate with a secret).                                           |
 | Discovery/issuer errors in wg-easy logs  | The configured server does not match the discovery issuer. Use the exact issuer URL from the provider's OpenID Configuration URL, trailing slash included. |
 | App does not stay signed in              | The app provider is missing the `offline_access` scope mapping, so Authentik issues no refresh token.                                                      |
+| Member of `wg-admins` but not admin      | Log in again (the role is calculated on login). Check that the user is a direct member, that the role was not set manually (Admin Panel → Users) and that `wg-admins` is saved as admin group. |
+| Self check shows no groups               | The `authentik default OpenID Mapping: profile` mapping is not assigned to the panel provider, so there is no `groups` claim. |

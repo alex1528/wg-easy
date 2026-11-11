@@ -67,6 +67,8 @@ export default defineEventHandler(async (event) => {
     userId: user.id,
   });
 
+  await Database.users.recordLogin(user.id);
+
   // TODO?: create audit log
 
   SERVER_DEBUG(`New Session: ${data.id} for ${user.id} (${user.username})`);

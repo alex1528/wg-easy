@@ -37,4 +37,36 @@ export const GeneralUpdateSchema = z.object({
 
 export type GeneralUpdateType = z.infer<typeof GeneralUpdateSchema>;
 
+function isHttpUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.host.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * LiveWireGuard endpoint url (stored with the OIDC settings).
+ * undefined = keep, null / "" = derive from the request host
+ */
+const liveWireGuardEndpointUrl = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+  z
+    .string({ message: t('zod.general.liveWireGuardEndpointUrl') })
+    .trim()
+    .max(2048, { message: t('zod.general.liveWireGuardEndpointUrl') })
+    .refine(isHttpUrl, { message: t('zod.general.liveWireGuardEndpointUrl') })
+    .nullable()
+    .optional()
+);
+
+/** body of POST /api/admin/general */
+export const GeneralUpdateRequestSchema = GeneralUpdateSchema.extend({
+  liveWireGuardEndpointUrl: liveWireGuardEndpointUrl,
+});
+
 export type SetupStepType = { step: number; done: boolean };

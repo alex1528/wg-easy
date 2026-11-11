@@ -86,3 +86,26 @@ export const UserUpdateTotpSchema = z.union([
 export const Verify2faSchema = z.object({
   totpCode: totpCode,
 });
+
+export const UserGetSchema = z.object({
+  userId: z.coerce
+    .number({ message: t('zod.user.id') })
+    .int({ message: t('zod.user.id') })
+    .positive({ message: t('zod.user.id') }),
+});
+
+export const UserAdminUpdateSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('setRole'),
+    role: z.enum(['ADMIN', 'CLIENT'], { message: t('zod.user.role') }),
+  }),
+  z.object({
+    action: z.literal('followOidc'),
+  }),
+  z.object({
+    action: z.literal('setEnabled'),
+    enabled: z.boolean({ message: t('zod.enabled') }),
+  }),
+]);
+
+export type UserAdminUpdateType = z.infer<typeof UserAdminUpdateSchema>;
