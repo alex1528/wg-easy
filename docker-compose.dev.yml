@@ -7,7 +7,9 @@ services:
       - /app/.nuxt
     volumes:
       - /lib/modules:/lib/modules:ro
-      # - ./data/:/etc/wireguard
+      # keep the database (/etc/wireguard/wg-easy.db) across rebuilds and restarts.
+      # Reset with: docker compose -f docker-compose.dev.yml down -v
+      - wg-easy-dev-data:/etc/wireguard
     ports:
       - "51820:51820/udp"
       - "51821:51821/tcp"
@@ -44,3 +46,6 @@ services:
             - package.json
             - pnpm-lock.yaml
             - pnpm-workspace.yaml
+
+volumes:
+  wg-easy-dev-data:
