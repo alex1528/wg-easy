@@ -61,7 +61,7 @@ REQUIRED_MODULES="http.handlers.rate_limit dns.providers.tencentcloud dns.provid
 # ---------- 环境检查 ----------
 command -v docker >/dev/null 2>&1 || die "未找到 docker 命令"
 docker info >/dev/null 2>&1      || die "docker 守护进程未运行，或当前用户没有权限（试试 sudo 或加入 docker 组）"
-for f in caddy/Dockerfile caddy/Caddyfile; do
+for f in caddy/Dockerfile caddy/Caddyfile caddy/admin-ips.caddy; do
   [ -f "$f" ] || die "缺少 $f，请在 wg-easy 仓库中运行"
 done
 
@@ -103,15 +103,16 @@ done
 echo "==> [3/4] 校验 caddy/Caddyfile"
 for mode in internal http tencentcloud alidns file; do
   if [ "$mode" = file ]; then
-    check='cat > /tmp/Caddyfile && caddy adapt --adapter caddyfile --config /tmp/Caddyfile >/dev/null'
+    check='printf "%s\n" "$ADMIN_IPS" > /etc/caddy/admin-ips.caddy && cat > /tmp/Caddyfile && caddy adapt --adapter caddyfile --config /tmp/Caddyfile >/dev/null'
     note="（仅语法）"
   else
-    check='cat > /tmp/Caddyfile && caddy validate --adapter caddyfile --config /tmp/Caddyfile'
+    check='printf "%s\n" "$ADMIN_IPS" > /etc/caddy/admin-ips.caddy && cat > /tmp/Caddyfile && caddy validate --adapter caddyfile --config /tmp/Caddyfile'
     note=""
   fi
   if out="$(docker run --rm -i \
         -e WG_WEB_HOST=vpn.example.com \
         -e CADDY_TLS_MODE="$mode" \
+        -e ADMIN_IPS="$(cat caddy/admin-ips.caddy)" \
         -e ACME_EMAIL=ci@example.com \
         -e CROWDSEC_BOUNCER_KEY=validateonly \
         -e CROWDSEC_LAPI_URL=http://127.0.0.1:8080 \

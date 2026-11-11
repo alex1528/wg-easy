@@ -123,12 +123,19 @@
 		# ---------- 0. CrowdSec：已被封禁的 IP 直接返回 403（对 /cnf/* 同样生效）----------
 		crowdsec
 
-		# ---------- 1. 来源 IP 白名单 ----------
-		# WG_ALLOW_IPS 为空格分隔的 IP/CIDR；默认 0.0.0.0/0 ::/0（不限制）
-		# /cnf/* 是发给终端用户的一次性配置链接，不受白名单限制（仍受限流约束）
+		# ---------- 1. 管理后台只允许管理员 IP，同步配置等公开接口允许所有 IP ----------
+		# 管理员 IP：caddy/admin-ips.caddy，由 scripts/admin-ips.sh 根据 CrowdSec 管理员白名单生成，两边是同一份名单
+		# 公开接口：WG_PUBLIC_PATHS（空格分隔），默认同步配置接口和一次性配置链接，只放行 GET / HEAD
+		#   公开接口仍受 CrowdSec 封禁、限流和 wg-easy 自身认证的约束
+		# 两个条件都不满足的请求直接断开连接
 		@blocked {
-			not remote_ip {$WG_ALLOW_IPS:0.0.0.0/0 ::/0}
-			not path /cnf/*
+			not {
+				import /etc/caddy/admin-ips.caddy
+			}
+			not {
+				path {$WG_PUBLIC_PATHS:/api/livewireguard/config /cnf/*}
+				method GET HEAD
+			}
 		}
 		abort @blocked
 
@@ -170,6 +177,16 @@
 				}
 				key {remote_host}
 				events 30
+				window 1m
+				ipv6_prefix 64
+			}
+			# 公开接口（同步配置）：所有 IP 都能访问，单独限流防刷
+			zone public_api {
+				match {
+					path {$WG_PUBLIC_PATHS:/api/livewireguard/config /cnf/*}
+				}
+				key {remote_host}
+				events {$RL_PUBLIC_PER_MIN:30}
 				window 1m
 				ipv6_prefix 64
 			}
