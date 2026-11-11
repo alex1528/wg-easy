@@ -190,6 +190,7 @@ describe('InterfaceUpdateSchema', () => {
     device: 'eth0',
     enabled: true,
     firewallEnabled: false,
+    clientFilterEnabled: false,
   };
 
   test('accepts an interface without header protection', () => {

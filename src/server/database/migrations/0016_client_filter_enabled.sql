@@ -1,0 +1,1 @@
+ALTER TABLE `interfaces_table` ADD `client_filter_enabled` integer DEFAULT false NOT NULL;

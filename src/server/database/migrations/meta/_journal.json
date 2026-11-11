@@ -113,6 +113,13 @@
       "when": 1794376125929,
       "tag": "0015_livewireguard_default_enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1794380768964,
+      "tag": "0016_client_filter_enabled",
+      "breakpoints": true
     }
   ]
 }

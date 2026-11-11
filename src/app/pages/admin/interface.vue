@@ -195,6 +195,12 @@
           :label="$t('admin.interface.firewallEnabled')"
           :description="$t('admin.interface.firewallEnabledDesc')"
         />
+        <FormSwitchField
+          id="clientFilterEnabled"
+          v-model="data.clientFilterEnabled"
+          :label="$t('admin.interface.clientFilterEnabled')"
+          :description="$t('admin.interface.clientFilterEnabledDesc')"
+        />
       </FormGroup>
       <FormGroup>
         <FormHeading>{{ $t('form.actions') }}</FormHeading>

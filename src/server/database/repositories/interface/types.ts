@@ -102,6 +102,7 @@ export const InterfaceUpdateSchema = schemaForType<InterfaceUpdateType>()(
 
       enabled: EnabledSchema,
       firewallEnabled: EnabledSchema,
+      clientFilterEnabled: EnabledSchema,
     })
     .superRefine((data, ctx) => {
       if (data.headerProtectionKey === null) return;

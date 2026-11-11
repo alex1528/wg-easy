@@ -2,6 +2,7 @@ import { createError, readValidatedBody } from 'h3';
 
 import Database from '#server/utils/Database';
 import WireGuard from '#server/utils/WireGuard';
+import { clientFilter } from '#server/utils/clientFilter';
 import { WG_ENV } from '#server/utils/config';
 import { firewall } from '#server/utils/firewall';
 import { definePermissionEventHandler } from '#server/utils/handler';
@@ -32,6 +33,22 @@ export default definePermissionEventHandler(
         throw createError({
           statusCode: 400,
           statusMessage: `Per-Client Firewall requires ${requiredTools} to be installed on the host system. Please install ${requiredTools} before enabling this feature.`,
+        });
+      }
+    }
+
+    // If enabling client filter, check if iptables with u32 match is available
+    if (data.clientFilterEnabled) {
+      clientFilter.clearAvailabilityCache();
+
+      const u32Available = await clientFilter.isAvailable(!WG_ENV.DISABLE_IPV6);
+      if (!u32Available) {
+        const requiredTools = WG_ENV.DISABLE_IPV6
+          ? 'iptables with the u32 match'
+          : 'iptables/ip6tables with the u32 match';
+        throw createError({
+          statusCode: 400,
+          statusMessage: `Client-Filter requires ${requiredTools} to be installed on the host system. Please install ${requiredTools} before enabling this feature.`,
         });
       }
     }

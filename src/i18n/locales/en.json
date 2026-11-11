@@ -237,7 +237,9 @@
       "restartSuccess": "Interface restarted",
       "firewall": "Traffic Filtering",
       "firewallEnabled": "Enable Per-Client Firewall",
-      "firewallEnabledDesc": "Restrict client traffic to specific destination IPs using iptables. When enabled, each client can be configured with allowed destinations."
+      "firewallEnabledDesc": "Restrict client traffic to specific destination IPs using iptables. When enabled, each client can be configured with allowed destinations.",
+      "clientFilterEnabled": "Allow Own Clients Only",
+      "clientFilterEnabledDesc": "Only accept handshakes from own LiveWireGuard clients. Generic WireGuard clients (e.g. the official app) cannot connect while enabled. Existing sessions are unaffected until their next rekey."
     },
     "introText": "Welcome to the admin panel.\n\nHere you can manage the general settings, the configuration, the interface settings and the hooks.\n\nStart by choosing one of the sections in the sidebar.",
     "oidc": {

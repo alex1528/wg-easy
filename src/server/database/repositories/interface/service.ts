@@ -29,6 +29,15 @@ function createPreparedStatement(db: DBType) {
       })
       .where(eq(wgInterface.name, sql.placeholder('interface')))
       .prepare(),
+    setClientFilterEnabled: db
+      .update(wgInterface)
+      .set({
+        clientFilterEnabled: sql.placeholder(
+          'clientFilterEnabled'
+        ) as never as boolean,
+      })
+      .where(eq(wgInterface.name, sql.placeholder('interface')))
+      .prepare(),
   };
 }
 
@@ -71,6 +80,13 @@ export class InterfaceService {
     return this.#statements.setFirewallEnabled.execute({
       interface: WG_ENV.WG_INTERFACE,
       firewallEnabled,
+    });
+  }
+
+  setClientFilterEnabled(clientFilterEnabled: boolean) {
+    return this.#statements.setClientFilterEnabled.execute({
+      interface: WG_ENV.WG_INTERFACE,
+      clientFilterEnabled,
     });
   }
 

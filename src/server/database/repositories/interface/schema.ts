@@ -46,6 +46,10 @@ export const wgInterface = sqliteTable('interfaces_table', {
   firewallEnabled: int('firewall_enabled', { mode: 'boolean' })
     .notNull()
     .default(false),
+  // Only allow handshakes from own clients (mac2 client-magic marker) on INPUT
+  clientFilterEnabled: int('client_filter_enabled', { mode: 'boolean' })
+    .notNull()
+    .default(false),
   createdAt: text('created_at')
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)`),

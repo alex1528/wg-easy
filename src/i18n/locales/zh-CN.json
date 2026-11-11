@@ -236,6 +236,8 @@
       "firewall": "流量过滤",
       "firewallEnabled": "启用客户端防火墙",
       "firewallEnabledDesc": "通过 iptables 限制客户端只能访问指定的目标 IP。启用后，可以为每个客户端单独配置允许访问的目标地址列表。",
+      "clientFilterEnabled": "仅允许自有客户端连接",
+      "clientFilterEnabledDesc": "仅接受自有 LiveWireGuard 客户端发起的握手，通用 WireGuard 客户端（如官方 App）将无法连接。已建立的会话不受影响，待其下次重新握手后生效。",
       "routingTable": "路由表",
       "routingTableDesc": "WireGuard 路由使用的路由表。可设为 auto、off 或路由表编号。"
     },

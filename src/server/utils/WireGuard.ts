@@ -4,6 +4,7 @@ import { createDebug } from 'obug';
 
 import Database from '#server/utils/Database';
 import { mergeClientStatuses } from '#server/utils/clientStatus';
+import { clientFilter } from '#server/utils/clientFilter';
 import { OLD_ENV, WG_ENV } from '#server/utils/config';
 import { firewall } from '#server/utils/firewall';
 import { encodeQRCode } from '#server/utils/qr';
@@ -28,6 +29,7 @@ class WireGuard {
     await this.#saveWireguardConfig(wgInterface);
     await this.#syncWireguardConfig(wgInterface);
     await this.#applyFirewallRules(wgInterface);
+    await this.#applyClientFilter(wgInterface);
   }
 
   /**
@@ -42,6 +44,13 @@ class WireGuard {
       userConfig,
       !WG_ENV.DISABLE_IPV6
     );
+  }
+
+  /**
+   * Apply the own-client handshake filter (INPUT chain) based on current config
+   */
+  async #applyClientFilter(wgInterface: InterfaceType) {
+    await clientFilter.rebuildRules(wgInterface, !WG_ENV.DISABLE_IPV6);
   }
 
   /**
@@ -265,9 +274,30 @@ class WireGuard {
       }
     }
 
+    // Check if client filter was enabled but iptables/u32 isn't available
+    if (wgInterface.clientFilterEnabled) {
+      const enableIpv6 = !WG_ENV.DISABLE_IPV6;
+      clientFilter.clearAvailabilityCache();
+      const u32Available = await clientFilter.isAvailable(enableIpv6);
+      if (!u32Available) {
+        const requiredTools = enableIpv6
+          ? 'iptables/ip6tables with the u32 match'
+          : 'iptables with the u32 match';
+        console.warn(
+          `WARNING: Client-Filter is enabled but ${requiredTools} is not available. Disabling client filter. Please install ${requiredTools} to use this feature.`
+        );
+        await Database.interfaces.setClientFilterEnabled(false);
+        wgInterface.clientFilterEnabled = false; // Update local copy
+      }
+    }
+
     WG_DEBUG('Applying firewall rules...');
     await this.#applyFirewallRules(wgInterface);
     WG_DEBUG('Firewall rules applied successfully.');
+
+    WG_DEBUG('Applying client filter...');
+    await this.#applyClientFilter(wgInterface);
+    WG_DEBUG('Client filter applied successfully.');
 
     WG_DEBUG('Starting Cron Job...');
     await this.startCronJob();
