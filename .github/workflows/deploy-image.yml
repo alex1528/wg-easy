@@ -1,0 +1,281 @@
+name: Image
+
+# 参考 Makefile 的 make deploy：
+#   TAG = git 短哈希 + latest；推 v* 标签时额外打 semver 标签
+#
+# 镜像仓库通过仓库 Variables 配置（Settings -> Secrets and variables -> Actions），
+# 支持任意 registry：腾讯云 TCR、阿里云 ACR、Docker Hub、自建 Harbor 等：
+#   Variables:
+#     DOCKER_REGISTRY   镜像仓库地址，留空 = Docker Hub
+#                       例：ccr.ccs.tencentyun.com、registry.cn-hangzhou.aliyuncs.com、ghcr.io
+#     DOCKER_NAMESPACE  命名空间（必填）
+#     DOCKER_IMAGE      镜像名，默认 wg-easy
+#   Secrets:
+#     DOCKER_USERNAME / DOCKER_PASSWORD   镜像仓库登录凭证
+#     LARK_WEBHOOK_URL                    飞书群机器人 webhook（可选，构建结果通知）
+#     WECOM_WEBHOOK_URL                   企业微信群机器人 webhook（可选，构建结果通知）
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - LiveWireGuard
+      - master
+    tags:
+      - "v*"
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  config:
+    name: Resolve image
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.cfg.outputs.image }}
+      registry: ${{ steps.cfg.outputs.registry }}
+    steps:
+      - name: Resolve full image name
+        id: cfg
+        env:
+          REGISTRY: ${{ vars.DOCKER_REGISTRY }}
+          NAMESPACE: ${{ vars.DOCKER_NAMESPACE }}
+          IMAGE: ${{ vars.DOCKER_IMAGE }}
+        run: |
+          NAME="${IMAGE:-wg-easy}"
+          if [ -n "$REGISTRY" ]; then
+            echo "image=${REGISTRY}/${NAMESPACE:?需要设置 Variable DOCKER_NAMESPACE}/${NAME}" >> "$GITHUB_OUTPUT"
+            echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=${NAMESPACE:?需要设置 Variable DOCKER_NAMESPACE}/${NAME}" >> "$GITHUB_OUTPUT"
+            echo "registry=" >> "$GITHUB_OUTPUT"
+          fi
+
+  docker-build:
+    name: Build Docker (${{ matrix.arch.platform }})
+    runs-on: ${{ matrix.arch.os }}
+    permissions:
+      contents: read
+    needs: [config]
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - platform: linux/amd64
+            os: ubuntu-latest
+          - platform: linux/arm64
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Prepare
+        run: |
+          platform=${{ matrix.arch.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
+      - name: Login to image registry
+        env:
+          REGISTRY: ${{ needs.config.outputs.registry }}
+          USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          if [ -z "$USERNAME" ]; then
+            echo "未配置 DOCKER_USERNAME / DOCKER_PASSWORD，跳过登录（推送可能失败）"
+            exit 0
+          fi
+          if [ -n "$REGISTRY" ]; then
+            echo "$PASSWORD" | docker login "$REGISTRY" --username "$USERNAME" --password-stdin
+          else
+            echo "$PASSWORD" | docker login --username "$USERNAME" --password-stdin
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          platforms: ${{ matrix.arch.platform }}
+          tags: ${{ needs.config.outputs.image }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=build-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=min,scope=build-${{ env.PLATFORM_PAIR }}
+
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-merge:
+    name: Merge & Push Manifest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: [config, docker-build]
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Login to image registry
+        env:
+          REGISTRY: ${{ needs.config.outputs.registry }}
+          USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          if [ -z "$USERNAME" ]; then
+            echo "未配置 DOCKER_USERNAME / DOCKER_PASSWORD，跳过登录（推送可能失败）"
+            exit 0
+          fi
+          if [ -n "$REGISTRY" ]; then
+            echo "$PASSWORD" | docker login "$REGISTRY" --username "$USERNAME" --password-stdin
+          else
+            echo "$PASSWORD" | docker login --username "$USERNAME" --password-stdin
+          fi
+
+      # 分支推送: sha-<短哈希> + latest（同 make deploy）
+      # 推送 v* 标签: v1.2.3 / 1.2 / 1 + latest
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ${{ needs.config.outputs.image }}
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest
+            type=sha,enable=${{ !startsWith(github.ref, 'refs/tags/') }}
+            type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=semver,pattern={{major}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ needs.config.outputs.image }}
+        run: |
+          n=3
+          for i in $(seq 1 $n); do
+            docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+              $(printf '%s@sha256:%s ' "$IMAGE" *) && break
+
+            [ "$i" = "$n" ] && exit 1
+            sleep 10
+          done
+
+      - name: Inspect image
+        env:
+          IMAGE: ${{ needs.config.outputs.image }}
+        run: |
+          docker buildx imagetools inspect "${IMAGE}:${{ steps.meta.outputs.version }}"
+
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [docker-merge]
+    steps:
+      - name: Send Lark notification
+        continue-on-error: true
+        env:
+          WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+          RESULT: ${{ needs.docker-merge.result }}
+          REGISTRY: ${{ vars.DOCKER_REGISTRY }}
+          NAMESPACE: ${{ vars.DOCKER_NAMESPACE }}
+          IMAGE_NAME: ${{ vars.DOCKER_IMAGE }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "未配置 LARK_WEBHOOK_URL，跳过飞书通知"
+            exit 0
+          fi
+          IMAGE_NAME="${IMAGE_NAME:-wg-easy}"
+          if [ -n "$REGISTRY" ]; then IMAGE="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}"; else IMAGE="${NAMESPACE}/${IMAGE_NAME}"; fi
+          case "$RESULT" in
+            success)   ICON="✅"; STATUS="发布成功" ;;
+            failure)   ICON="❌"; STATUS="发布失败" ;;
+            cancelled) ICON="⏹"; STATUS="已取消" ;;
+            *)         ICON="❌"; STATUS="失败（job: ${RESULT}）" ;;
+          esac
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+            MAJOR="${VER%%.*}"
+            if [[ "$VER" == *.* ]]; then MINOR="${VER%.*}"; else MINOR="$MAJOR.0"; fi
+            TAGS="$GITHUB_REF_NAME $MINOR $MAJOR latest"
+            REF_LABEL="Tag"
+          else
+            TAGS="latest sha-${GITHUB_SHA::7}"
+            REF_LABEL="分支"
+          fi
+          TEXT=$(printf '%s\n' \
+            "${ICON} wg-easy 镜像${STATUS}" \
+            "仓库: ${IMAGE}" \
+            "标签: ${TAGS}" \
+            "${REF_LABEL}: ${GITHUB_REF_NAME}" \
+            "提交: ${GITHUB_SHA::7} $(echo "$COMMIT_MSG" | head -n 1)" \
+            "触发: ${ACTOR}" \
+            "日志: ${RUN_URL}")
+          PAYLOAD=$(jq -n --arg text "$TEXT" '{msg_type:"text", content:{text:$text}}')
+          curl -sS --max-time 15 -H 'Content-Type: application/json' -d "$PAYLOAD" "$WEBHOOK_URL"
+
+      - name: Send WeCom notification
+        continue-on-error: true
+        env:
+          WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+          RESULT: ${{ needs.docker-merge.result }}
+          REGISTRY: ${{ vars.DOCKER_REGISTRY }}
+          NAMESPACE: ${{ vars.DOCKER_NAMESPACE }}
+          IMAGE_NAME: ${{ vars.DOCKER_IMAGE }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "未配置 WECOM_WEBHOOK_URL，跳过企业微信通知"
+            exit 0
+          fi
+          IMAGE_NAME="${IMAGE_NAME:-wg-easy}"
+          if [ -n "$REGISTRY" ]; then IMAGE="${REGISTRY}/${NAMESPACE}/${IMAGE_NAME}"; else IMAGE="${NAMESPACE}/${IMAGE_NAME}"; fi
+          case "$RESULT" in
+            success)   ICON="✅"; STATUS="发布成功" ;;
+            failure)   ICON="❌"; STATUS="发布失败" ;;
+            cancelled) ICON="⏹"; STATUS="已取消" ;;
+            *)         ICON="❌"; STATUS="失败（job: ${RESULT}）" ;;
+          esac
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+            MAJOR="${VER%%.*}"
+            if [[ "$VER" == *.* ]]; then MINOR="${VER%.*}"; else MINOR="$MAJOR.0"; fi
+            TAGS="$GITHUB_REF_NAME $MINOR $MAJOR latest"
+            REF_LABEL="Tag"
+          else
+            TAGS="latest sha-${GITHUB_SHA::7}"
+            REF_LABEL="分支"
+          fi
+          TEXT=$(printf '%s\n' \
+            "${ICON} wg-easy 镜像${STATUS}" \
+            "仓库: ${IMAGE}" \
+            "标签: ${TAGS}" \
+            "${REF_LABEL}: ${GITHUB_REF_NAME}" \
+            "提交: ${GITHUB_SHA::7} $(echo "$COMMIT_MSG" | head -n 1)" \
+            "触发: ${ACTOR}" \
+            "日志: ${RUN_URL}")
+          PAYLOAD=$(jq -n --arg text "$TEXT" '{msgtype:"text", text:{content:$text}}')
+          curl -sS --max-time 15 -H 'Content-Type: application/json' -d "$PAYLOAD" "$WEBHOOK_URL"
