@@ -11,6 +11,7 @@
 #   bash scripts/diagnose-public.sh --setup '<livewireguard://setup?d=...>'  # 解码 App 实际使用的设置链接（首页“复制链接”）
 #   bash scripts/diagnose-public.sh --dns [域名 ...]         # 查 A / AAAA：有没有 IPv6 记录、不同 DNS（线路）是否返回不同地址
 #   sudo bash scripts/diagnose-public.sh --lines [线路IP ...] # 双线服务器：检查每条线路的入口、回程路由，给出修正命令
+#   sudo bash scripts/diagnose-public.sh --trace [秒数]       # 逐层计数：SYN 到网卡 → rp_filter → 转发给容器 → SYN-ACK 从哪张网卡出
 #
 # 客户端同步超时、但 --watch 里什么都没出现：请求根本没到这台服务器的 Caddy，
 #   问题在客户端连的地址、DNS、上游防火墙/安全组，或者客户端卡在 OIDC 登录（第 8 步）
@@ -18,6 +19,14 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 LOG=caddy/logs/access.log
+
+# 当前部署实际使用的 compose 文件（容器标签里记录的），找不到时用 docker-compose-dirty.yml
+compose_file() {
+  local f
+  f="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' wg-easy-caddy 2>/dev/null || true)"
+  f="${f%%,*}"
+  if [ -n "$f" ] && [ "$f" != "<no value>" ]; then basename "$f"; else echo docker-compose-dirty.yml; fi
+}
 
 # 把 Caddy 的 JSON 访问日志转成一行：时间 来源IP 方法 状态 路径 耗时 主机 客户端
 # 各字段单独匹配，不依赖 JSON 字段顺序；解析不了的行原样显示（以 ? 开头），不会被静默丢掉
@@ -257,12 +266,16 @@ case "${1:-}" in
     echo "== 默认路由"
     ip -4 route show default | sed 's/^/  · /'
     ndef="$(ip -4 route show default | grep -c . || true)"
-    echo "== 策略路由（ip rule）"
-    ip -4 rule show | sed 's/^/  · /'
+    # 先存进变量：规则多时 "ip rule show | grep -q" 会因 SIGPIPE + pipefail 误判
+    RULES_NOW="$(ip -4 rule show)"
+    echo "== 策略路由（ip rule，共 $(grep -c . <<<"$RULES_NOW") 条；相同规则合并显示，括号里是条数）"
+    sed -E 's/^[0-9]+:[[:space:]]+//' <<<"$RULES_NOW" | awk '{c[$0]++; if (c[$0] == 1) o[++n] = $0} END {for (i = 1; i <= n; i++) printf "  · %s%s\n", o[i], (c[o[i]] > 1 ? "  (" c[o[i]] ")" : "")}' | head -n 60
+    nfw="$(grep -cE 'from all fwmark 0x[0-9a-f]+/0xff lookup' <<<"$RULES_NOW" || true)"
     echo
-    nlocal=0; HOST_BAD=0; DOCKER_BAD=0; DL_ON=0
-    BR="$(ip -4 route get 10.42.42.43 2>/dev/null | sed -nE 's/.* dev ([^ ]+).*/\1/p' | head -n 1)"
-    ip -4 rule show | grep -qE 'fwmark 0x1[0-9a-f]/0xff' && DL_ON=1
+    nlocal=0; HOST_BAD=0; DOCKER_BAD=0; DL_ON=0; RPF_BAD=0
+    CIP_L="${TRACE_CADDY_IP:-10.42.42.43}"
+    BR="$(ip -4 route get "$CIP_L" 2>/dev/null | sed -nE 's/.* dev ([^ ]+).*/\1/p' | head -n 1)"
+    if [ "${nfw:-0}" -gt 0 ]; then DL_ON=1; fi
     for ip in $LIPS; do
       dev="$(ip -4 -o addr show | awk -v ip="$ip" '{split($4, a, "/"); if (a[1] == ip) print $2}' | head -n 1)"
       echo "== 线路 $ip"
@@ -285,11 +298,20 @@ case "${1:-}" in
       else
         echo "  ✔ 本机进程（如 sshd）的回程走 $dev"
       fi
+      rp_a="$(cat /proc/sys/net/ipv4/conf/all/rp_filter 2>/dev/null || echo 0)"
+      rp_d="$(cat "/proc/sys/net/ipv4/conf/$dev/rp_filter" 2>/dev/null || echo 0)"
+      rp_e=$(( rp_a > rp_d ? rp_a : rp_d ))
+      if [ "$rp_e" = 1 ]; then
+        echo "  ✘ rp_filter 严格模式（all=$rp_a $dev=$rp_d）：从 $dev 进来、DNAT 到容器的连接会被内核丢弃"
+        RPF_BAD=1
+      else
+        echo "  ✔ rp_filter=$rp_e（all=$rp_a $dev=$rp_d），不会丢弃 DNAT 到容器的连接"
+      fi
       if [ -n "$BR" ]; then
-        cvia="$(ip -4 route get 1.1.1.1 from 10.42.42.43 iif "$BR" 2>/dev/null | head -n 1)"
+        cvia="$(ip -4 route get 1.1.1.1 from "$CIP_L" iif "$BR" 2>/dev/null | head -n 1)"
         cdev="$(printf '%s' "$cvia" | sed -nE 's/.* dev ([^ ]+).*/\1/p')"
         if [ "$DL_ON" = 1 ]; then
-          echo "  · Docker 容器回包：已启用 deploy/dual-line-route.sh（按连接标记选线路），详情 sudo bash deploy/dual-line-route.sh status"
+          echo "  · Docker 容器回包：已启用 deploy/dual-line-route.sh（fwmark 规则 $nfw 条，按连接标记选线路），详情 sudo bash deploy/dual-line-route.sh status"
         elif [ -n "$cdev" ] && [ "$cdev" != "$dev" ]; then
           echo "  ✘ Docker 容器（Caddy / wg-easy）的回包：$cvia"
           echo "    从 $cdev 出去，不是 $dev。51821/tcp、51820/udp 是 DNAT 到容器的，回包源地址是 10.42.42.x，"
@@ -301,6 +323,11 @@ case "${1:-}" in
       fi
     done
     echo
+    nl="$(echo $LIPS | wc -w)"
+    if [ "${nfw:-0}" -gt $((nl + 1)) ]; then
+      echo "== ⚠ fwmark 规则有 $nfw 条，远多于线路数：旧版 dual-line-route.sh 把重复的 from 规则当成多条线路。"
+      echo "   更新脚本后执行 sudo bash deploy/dual-line-route.sh apply，会先清理再按去重后的线路重建"
+    fi
     if [ "$nlocal" -eq 0 ]; then
       echo "== 结论：线路 IP 都不在本机网卡上，由前置设备转发。本机不用改，检查前置设备的 51821/tcp 转发和来源限制"
     elif [ "$DOCKER_BAD" = 1 ]; then
@@ -312,6 +339,10 @@ case "${1:-}" in
     elif [ "$HOST_BAD" = 0 ]; then
       echo "== 结论：本机进程和 Docker 容器的回程都走原线路"
     fi
+    if [ "$RPF_BAD" = 1 ]; then
+      echo "== rp_filter：线路网卡是严格模式。DNAT 之后反向路由查到默认网关，从线路网卡进来、转给容器的连接会被内核丢弃"
+      echo "   修正：sudo bash deploy/dual-line-route.sh apply（会把线路网卡 rp_filter 设为 2）"
+    fi
     echo
     echo "== 在 4G 热点下的电脑上逐条执行（直接指定线路 IP，绕开智能解析）"
     for ip in $LIPS; do
@@ -321,7 +352,95 @@ case "${1:-}" in
     echo
     echo "== hairpin（隧道内访问 Web UI）也要覆盖所有线路：.env 中设置"
     echo "   WG_HAIRPIN_DST4=$LIPS"
-    echo "   然后 docker compose -f docker-compose-dirty.yml up -d --no-build --force-recreate wg-easy"
+    echo "   然后 docker compose -f $(compose_file) up -d --no-build --force-recreate wg-easy"
+    exit 0
+    ;;
+  --trace)
+    SECS="${2:-60}"
+    case "$SECS" in ''|*[!0-9]*) echo "用法：sudo bash $0 --trace [秒数，默认 60]"; exit 2 ;; esac
+    [ "$(id -u)" = 0 ] || { echo "需要 root：sudo bash $0 --trace $SECS"; exit 1; }
+    command -v iptables >/dev/null 2>&1 || { echo "需要 iptables"; exit 1; }
+    TT=wgdiag
+    CIP="${TRACE_CADDY_IP:-10.42.42.43}"
+    TP=51821
+    DEVS="$(ip -4 -o addr show | awk '$2 != "lo" && $2 !~ /^(docker|br-|veth)/ {print $2}' | sort -u | tr '\n' ' ')"
+    rpd() { awk '/^TcpExt:/ { if (!h) { for (i = 2; i <= NF; i++) n[i] = $i; h = 1 } else { for (i = 2; i <= NF; i++) if (n[i] == "IPReversePathFilter") v = $i } } END { print v + 0 }' /proc/net/netstat 2>/dev/null; }
+    cnt() { iptables -t "$1" -L "$2" -v -n -x 2>/dev/null | awk -v k="/* $3 */" 'index($0, k) { s += $1 } END { print s + 0 }'; }
+    tclean() {
+      local tb l
+      for tb in raw mangle filter; do
+        while IFS= read -r l; do
+          [ -n "$l" ] || continue
+          read -ra a <<<"$l"; a[0]=-D
+          iptables -t "$tb" "${a[@]}" 2>/dev/null || true
+        done < <(iptables -t "$tb" -S 2>/dev/null | grep -F -- "--comment $TT-" || true)
+      done
+    }
+    tclean
+    trap 'tclean; echo; echo "已删除临时计数规则"; exit 130' INT TERM
+    for d in $DEVS; do
+      iptables -t raw -I PREROUTING 1 -i "$d" -p tcp --dport "$TP" --syn -m comment --comment "$TT-in-$d"
+      iptables -t mangle -I POSTROUTING 1 -o "$d" -p tcp --sport "$TP" --tcp-flags SYN,ACK SYN,ACK -m comment --comment "$TT-out-$d"
+    done
+    iptables -t filter -I FORWARD 1 -d "$CIP" -p tcp --dport "$TP" --syn -m comment --comment "$TT-fwd"
+    R0="$(rpd)"
+    H="$(docker exec wg-easy-caddy printenv WG_WEB_HOST 2>/dev/null || true)"; H="${H:-vrh.verycloud.cn}"
+    echo "已插入临时计数规则（只计数，不改变任何流量）。网卡：$DEVS"
+    echo "接下来 $SECS 秒内（按回车提前结束），只用 4G 网络执行下面的命令，或在 App 里点“立即同步配置”："
+    for d in $DEVS; do
+      for ad in $(ip -4 -o addr show dev "$d" | awk '{split($4, x, "/"); print x[1]}'); do
+        case "$ad" in 10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) continue ;; esac
+        echo "  curl -sS -o /dev/null -m 10 -w '%{http_code}\\n' --resolve $H:$TP:$ad https://$H:$TP/api/livewireguard/config"
+      done
+    done
+    echo "  测试期间不要从白名单网络访问，否则会混进统计"
+    if [ -t 0 ]; then read -r -t "$SECS" _ || true; else sleep "$SECS"; fi
+    R1="$(rpd)"
+    tin=0; tout=0; ins=""; outs=""
+    echo
+    echo "== 统计"
+    for d in $DEVS; do
+      i="$(cnt raw PREROUTING "$TT-in-$d")"; o="$(cnt mangle POSTROUTING "$TT-out-$d")"
+      printf '  · %-8s 进来的 SYN：%-5s 发出的 SYN-ACK：%s\n' "$d" "$i" "$o"
+      tin=$((tin + i)); tout=$((tout + o))
+      if [ "$i" -gt 0 ]; then ins="$ins $d"; fi
+      if [ "$o" -gt 0 ]; then outs="$outs $d"; fi
+    done
+    fwd="$(cnt filter FORWARD "$TT-fwd")"
+    rpdelta=$(( ${R1:-0} - ${R0:-0} ))
+    echo "  · 转发给容器 $CIP:$TP 的 SYN：$fwd"
+    echo "  · 内核反向路径过滤（rp_filter）新增丢包：$rpdelta"
+    tclean; trap - INT TERM
+    echo "  （临时计数规则已删除）"
+    echo
+    echo "== 结论"
+    if [ "$tin" -eq 0 ]; then
+      echo "  ✘ 没有任何发往 $TP 的新连接到达本机网卡：包在到达服务器之前就被丢了（上游 ACL / 安全组 / 运营商），"
+      echo "    或者测试时连的不是本机 IP。这里的计数在本机所有防火墙和路由之前，本机配置改不了这种情况"
+    elif [ "$fwd" -eq 0 ]; then
+      if [ "$rpdelta" -gt 0 ]; then
+        echo "  ✘ 连接到了网卡（$ins），但被内核反向路径过滤丢弃（rp_filter 严格模式）："
+        echo "    Docker 端口是 DNAT 到容器的，DNAT 之后反向路由按 $CIP 查，匹配不到 from <线路IP> 规则，"
+        echo "    查到默认网关所在的网卡，和进来的网卡不一致"
+        echo "    修正：sudo bash deploy/dual-line-route.sh apply   # 会把线路网卡 rp_filter 设为 2（宽松）"
+      else
+        echo "  ✘ 连接到了网卡（$ins），但没有转发给容器：在转发前被本机丢弃。检查："
+        echo "    iptables -t raw -S PREROUTING; iptables -t mangle -S PREROUTING; iptables -t nat -S PREROUTING"
+        echo "    firewall-cmd --state && firewall-cmd --list-all-zones   # firewalld 的 zone 来源限制"
+      fi
+    elif [ "$tout" -eq 0 ]; then
+      echo "  ✘ 转发给了容器，但没有 SYN-ACK 发出：Caddy 没在 $CIP:$TP 监听，或回包在本机被丢弃（iptables -S FORWARD、DOCKER-USER）"
+    else
+      bad_out=""
+      for d in $outs; do case " $ins " in *" $d "*) ;; *) bad_out="$bad_out $d" ;; esac; done
+      if [ -n "$bad_out" ]; then
+        echo "  ✘ SYN 从$ins 进来，SYN-ACK 却从$bad_out 发出：回包走错线路，运营商会丢掉"
+        echo "    修正：sudo bash deploy/dual-line-route.sh apply，再 sudo bash deploy/dual-line-route.sh status 确认"
+      else
+        echo "  ✔ 网络层正常：SYN 从$ins 进来，SYN-ACK 从同一网卡发出"
+        echo "    仍然超时就是 TLS / HTTP 层的问题：同时运行 --watch，并看 docker logs --since 5m wg-easy-caddy"
+      fi
+    fi
     exit 0
     ;;
   --oidc)
@@ -359,7 +478,7 @@ case "${1:-}" in
     echo "   最后才请求 wg-easy。OIDC 任一端点不可达，客户端就会超时，wg-easy / Caddy 日志里也不会有记录"
     exit 0
     ;;
-  -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
 esac
 
 P="${1:-/api/livewireguard/config}"
@@ -384,7 +503,7 @@ if [ -f caddy/Caddyfile ] && cmp -s caddy/Caddyfile <(docker exec "$C" cat /etc/
   ok "与宿主机 caddy/Caddyfile 一致"
 else
   bad "与宿主机 caddy/Caddyfile 不一致：git pull 后只 restart 不会换文件，要执行"
-  info "docker compose -f docker-compose-dirty.yml up -d --no-build --force-recreate caddy"
+  info "docker compose -f $(compose_file) up -d --no-build --force-recreate caddy"
 fi
 if docker exec "$C" test -s /etc/caddy/admin-ips.caddy 2>/dev/null; then
   ok "管理员名单已挂载：$(docker exec "$C" grep -c . /etc/caddy/admin-ips.caddy) 行"

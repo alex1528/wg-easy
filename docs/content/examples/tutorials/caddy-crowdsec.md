@@ -301,7 +301,9 @@ sudo bash deploy/dual-line-route.sh install    # 安装 systemd 服务 wg-easy-d
 sudo bash deploy/dual-line-route.sh remove     # 回退
 ```
 
-脚本自动发现 `ip rule` 里的线路（IP 在本机网卡上、对应的表有默认路由），每条线路分配一个标记：从这张网卡进来的新连接打上连接标记，容器的回包恢复标记后按 `fwmark` 查这条线路的表。只改 mangle 表和 `ip rule`，不动 Docker 的 nat / filter 规则，也不影响从内网网卡进来的连接。`firewalld --reload` 会清掉 mangle 规则，之后重新 `apply`（或 `systemctl restart wg-easy-dual-line`）。
+还有一个更隐蔽的问题：DNAT 发生在路由之前，内核做反向路径检查（`rp_filter`）时目的地址已经是 `10.42.42.x`，同样匹配不到 `from <线路IP>`，反向路由查到默认网关所在的内网网卡。`rp_filter=1`（严格，很多发行版的默认值）时，从线路网卡进来、转给容器的 SYN 会被内核直接丢弃，客户端表现为 TCP 连接超时；本机 sshd 等不经 DNAT 的服务完全正常，所以平时看不出来。
+
+脚本自动发现 `ip rule` 里的线路（IP 在本机网卡上、对应的表有默认路由），每条线路分配一个标记：从这张网卡进来的新连接打上连接标记，容器的回包恢复标记后按 `fwmark` 查这条线路的表；同时把线路网卡的 `rp_filter` 设为 `2`（宽松，`remove` 时恢复原值）。只改 mangle 表和 `ip rule`，不动 Docker 的 nat / filter 规则，也不影响从内网网卡进来的连接。`firewalld --reload` 会清掉 mangle 规则，之后重新 `apply`（或 `systemctl restart wg-easy-dual-line`）。
 
 ## 第 4 步：验证
 
@@ -532,6 +534,7 @@ bash scripts/diagnose-public.sh --oidc                # 列出 OIDC 端点，生
 bash scripts/diagnose-public.sh --setup '<设置链接>'   # 解码 App 实际使用的 issuer / endpoint 并生成测试命令（首页“复制链接”）
 bash scripts/diagnose-public.sh --dns <域名> <Authentik 域名>  # 查 A / AAAA 记录和不同 DNS 线路的解析结果
 sudo bash scripts/diagnose-public.sh --lines           # 双线服务器：检查每条线路的入口和回程，打印修正命令
+sudo bash scripts/diagnose-public.sh --trace 60        # 60 秒内在 4G 上测试，逐层计数定位丢包位置
 ```
 
 脚本依次检查：容器里的 Caddyfile 和管理员名单是不是新版、路径是否在 `WG_PUBLIC_PATHS` 里、wg-easy 自己对这个路径返回什么、经过 Caddy 返回什么、访问日志和 CrowdSec 封禁，最后列出最近被管理员 IP 规则拦下的路径（客户端需要但没有开放的路径就在这里），并检查 OIDC 服务能否访问。客户端同步超时，而 `--watch` 里没有出现任何请求，说明请求根本没到这台服务器：检查客户端填的服务器地址、上游防火墙或安全组，以及客户端所在网络能否访问 OIDC 服务（第 8 步给出了测试命令）。经过 Caddy 的结果这样看：
@@ -662,6 +665,8 @@ bash scripts/sync-upstream.sh --continue  # 手工处理完冲突或检查问题
 | 4G 等外网客户端同步超时、访问日志里没有记录，办公网正常 | 多半是 DNS：域名或 Authentik 有 AAAA 但 IPv6 不通，或智能解析让 4G 线路解析到别的地址。用 `--dns` 检查，删掉 AAAA 或错误的线路记录；见“IPv4 优先（4G 客户端）” |
 | 双线服务器：部分运营商（如 4G）用户同步超时，`--dns` 显示域名解析到两个 IP | 第二条线路没有转发 `51821/tcp`，或回程走错线路。见“双线服务器”，用 `--lines` 和 `--capture` 定位 |
 | 多线服务器：只有公司其他出口（白名单 IP）能同步，4G 超时；`--lines` 显示“Docker 容器回包从 eth3 出去” | 容器回包匹配不到 `from <线路IP>` 策略路由，走了默认路由。`sudo bash deploy/dual-line-route.sh install` |
+| 多线服务器：`dual-line-route.sh status` 显示回包路由正确，4G 仍 TCP 超时 | 线路网卡 `rp_filter=1`，DNAT 到容器的 SYN 被内核丢弃。`sudo bash scripts/diagnose-public.sh --trace` 确认（“rp_filter 新增丢包”大于 0），再 `sudo bash deploy/dual-line-route.sh apply` |
+| `ip rule` 里有大量 `fwmark 0x../0xff` 规则（几十上百条） | 系统里同一条 `from <线路IP> lookup <表>` 被重复添加过多次，0.2.4 版 `dual-line-route.sh` 把每一份重复都当成一条线路。更新到 0.2.5 后执行 `sudo bash deploy/dual-line-route.sh apply`，会先清理本脚本加过的全部规则，再按去重后的线路重建；系统自己的重复 `from` 规则不影响功能，`status` 会列出来 |
 
 ## 已知限制
 
