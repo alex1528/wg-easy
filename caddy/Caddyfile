@@ -125,7 +125,10 @@
 
 		# ---------- 1. 管理后台只允许管理员 IP，同步配置等公开接口允许所有 IP ----------
 		# 管理员 IP：caddy/admin-ips.caddy，由 scripts/admin-ips.sh 根据 CrowdSec 管理员白名单生成，两边是同一份名单
-		# 公开接口：WG_PUBLIC_PATHS（空格分隔），默认同步配置接口和一次性配置链接，只放行 GET / HEAD
+		# 公开接口：WG_PUBLIC_PATHS（空格分隔），不限请求方法。默认：
+		#   /api/livewireguard/*                 客户端同步配置等接口
+		#   /api/auth/oidc、/api/auth/oidc/*     客户端同步前的 OIDC 登录和回调（/callback）
+		#   /cnf/*                               一次性配置链接
 		#   公开接口仍受 CrowdSec 封禁、限流和 wg-easy 自身认证的约束
 		# 两个条件都不满足的请求返回 403，带 X-Wg-Gate: admin-only 头，
 		#   便于和 CrowdSec 封禁（403，无此头）、限流（429）、wg-easy 自身的错误区分
@@ -134,10 +137,7 @@
 			not {
 				import /etc/caddy/admin-ips.caddy
 			}
-			not {
-				path {$WG_PUBLIC_PATHS:/api/livewireguard/config /cnf/*}
-				method GET HEAD
-			}
+			not path {$WG_PUBLIC_PATHS:/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*}
 		}
 		header @blocked X-Wg-Gate "admin-only"
 		respond @blocked "Forbidden: admin IP only" 403
@@ -183,10 +183,10 @@
 				window 1m
 				ipv6_prefix 64
 			}
-			# 公开接口（同步配置）：所有 IP 都能访问，单独限流防刷
+			# 公开接口（同步配置、OIDC 登录）：所有 IP 都能访问，单独限流防刷
 			zone public_api {
 				match {
-					path {$WG_PUBLIC_PATHS:/api/livewireguard/config /cnf/*}
+					path {$WG_PUBLIC_PATHS:/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*}
 				}
 				key {remote_host}
 				events {$RL_PUBLIC_PER_MIN:30}

@@ -29,7 +29,7 @@ flowchart LR
 Caddy 处理每个请求的顺序：
 
 1. CrowdSec 封禁检查，已封禁的 IP 返回 403
-2. 管理后台只允许管理员 IP（与 CrowdSec 管理员白名单是同一份名单）；同步配置接口和 `/cnf/*` 一次性链接对所有 IP 开放，只放行 GET / HEAD
+2. 管理后台只允许管理员 IP（与 CrowdSec 管理员白名单是同一份名单）；同步配置接口、客户端的 OIDC 登录和 `/cnf/*` 一次性链接对所有 IP 开放
 3. `/metrics/*` 只允许内网 IP
 4. 限流，超出返回 429
 5. 压缩后转发给 wg-easy
@@ -127,7 +127,7 @@ TENCENTCLOUD_SECRET_KEY=xxxxxxxxxxxxxxxx
 
 | 变量                          | 默认值                                                  | 说明                                                                         |
 | ----------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `WG_PUBLIC_PATHS`             | `/api/livewireguard/config /cnf/*`                      | 所有 IP 都能访问的路径（只放行 GET / HEAD），其余只允许管理员 IP             |
+| `WG_PUBLIC_PATHS`             | 见说明                                                     | 所有 IP 都能访问的路径，默认 `/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*`，其余只允许管理员 IP |
 | `RL_PUBLIC_PER_MIN`           | `30`                                                    | 公开接口每个 IP 每分钟的请求上限                                    |
 | `CADDY_HSTS`                  | `max-age=0`                                             | 换成正式证书并稳定运行后改为 `max-age=31536000`                              |
 | `RL_LOGIN_PER_MIN`            | `5`                                                     | 每个 IP 每分钟允许的登录和 2FA 请求次数                                      |
@@ -460,7 +460,7 @@ docker exec wg-easy-crowdsec cscli alerts delete --ip <IP>      # 解封并清�
 管理员 IP 只维护一份：`crowdsec/parsers/s02-enrich/wg-easy-whitelist.yaml`。它同时决定两件事：
 
 - **永不被 CrowdSec 封禁**
-- **可以进入管理后台**：Caddy 只放行这些 IP；`WG_PUBLIC_PATHS` 里的路径（默认同步配置接口 `/api/livewireguard/config` 和一次性链接 `/cnf/*`）对所有 IP 开放，只放行 GET / HEAD，其余请求返回 403（带 `X-Wg-Gate: admin-only` 头）
+- **可以进入管理后台**：Caddy 只放行这些 IP；`WG_PUBLIC_PATHS` 里的路径对所有 IP 开放（默认同步配置接口 `/api/livewireguard/*`、客户端同步前的 OIDC 登录 `/api/auth/oidc` 和回调 `/api/auth/oidc/*`、一次性链接 `/cnf/*`），其余请求返回 403（带 `X-Wg-Gate: admin-only` 头）
 
 Caddy 读不了 YAML，所以由 `scripts/admin-ips.sh` 把名单转成 `caddy/admin-ips.caddy`。修改流程：
 
@@ -479,7 +479,7 @@ bash scripts/diagnose-public.sh                     # 默认检查 /api/livewire
 bash scripts/diagnose-public.sh /api/auth/oidc/callback
 ```
 
-脚本依次检查：容器里的 Caddyfile 和管理员名单是不是新版、路径是否在 `WG_PUBLIC_PATHS` 里、wg-easy 自己对这个路径返回什么、经过 Caddy 返回什么、访问日志和 CrowdSec 封禁。经过 Caddy 的结果这样看：
+脚本依次检查：容器里的 Caddyfile 和管理员名单是不是新版、路径是否在 `WG_PUBLIC_PATHS` 里、wg-easy 自己对这个路径返回什么、经过 Caddy 返回什么、访问日志和 CrowdSec 封禁，最后列出最近被管理员 IP 规则拦下的路径（客户端需要但没有开放的路径就在这里）。经过 Caddy 的结果这样看：
 
 | 结果                            | 含义                                                     |
 | ------------------------------- | -------------------------------------------------------- |
@@ -577,6 +577,7 @@ docker compose -f docker-compose-dirty.yml up -d --force-recreate crowdsec caddy
 | 多台服务器时，连着一台的隧道同步另一台的配置，提示“不是有效的 JSON” | 隧道内的转发规则没有限定目的地址，请求被当前隧道所在服务器的 Caddy 截走。更新 `deploy/wg-easy-hairpin.sh` 后重建 wg-easy，确认日志里“本机地址”只有本机公网 IP |
 | 所有请求 502，Caddy 日志 `dial tcp 10.42.42.42:51821: connect: connection refused`；wg-easy 日志 `listen EADDRNOTAVAIL ... <公网IP>:51821` | wg-easy 的 `HOST` 环境变量被改成了域名。旧版 `deploy/wg-easy-hairpin.sh` 有这个问题，更新脚本后执行 `docker compose -f docker-compose-dirty.yml up -d --no-build --force-recreate wg-easy` |
 | 管理员打不开后台（403，带 `X-Wg-Gate: admin-only` 头），同步配置正常 | 当前出口 IP 不在 CrowdSec 管理员白名单里，或改了名单后没有运行 `bash scripts/admin-ips.sh` 并重启 Caddy。连着 VPN 隧道时来源是 `10.42.42.42`，同样会被拦下 |
+| 非管理员 IP 的客户端同步配置失败，curl 测 `/api/livewireguard/config` 却正常 | 客户端同步还会访问别的路径（如 OIDC 登录 `/api/auth/oidc/callback`）。运行 `bash scripts/diagnose-public.sh` 看第 6 步列出的被拦路径，加进 `WG_PUBLIC_PATHS` |
 
 ## 已知限制
 

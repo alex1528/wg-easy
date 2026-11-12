@@ -40,7 +40,7 @@ old="$(docker exec "$C" printenv WG_ALLOW_IPS 2>/dev/null || true)"
 [ -z "$old" ] || bad "容器里还有旧变量 WG_ALLOW_IPS=$old，说明容器没有按新 compose 重建"
 
 PP="$(docker exec "$C" printenv WG_PUBLIC_PATHS 2>/dev/null || true)"
-PP="${PP:-/api/livewireguard/config /cnf/*}"
+PP="${PP:-/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*}"
 hit=""
 set -f
 for pat in $PP; do
@@ -107,4 +107,29 @@ echo "== 5. CrowdSec 当前封禁"
 if docker ps --format '{{.Names}}' | grep -qx wg-easy-crowdsec; then
   n="$(docker exec wg-easy-crowdsec cscli decisions list -o raw 2>/dev/null | tail -n +2 | grep -c . || true)"
   info "当前封禁 ${n:-0} 条；查某个 IP：docker exec wg-easy-crowdsec cscli decisions list --ip <IP>"
+fi
+
+echo
+echo "== 6. 最近被管理员 IP 规则拦下的请求（来源 IP / 方法 / 路径 / 次数）"
+info "这里出现的路径就是客户端需要、但不在 WG_PUBLIC_PATHS 里的路径"
+if [ -f caddy/logs/access.log ]; then
+  blocked="$(tail -n 20000 caddy/logs/access.log | grep -F '"X-Wg-Gate":["admin-only"]' \
+    | sed -E 's/.*"client_ip":"([^"]*)".*"method":"([A-Z]+)".*"uri":"([^"?]*).*/\1 \2 \3/' \
+    | sort | uniq -c | sort -rn | head -n 20)"
+  if [ -n "$blocked" ]; then
+    echo "$blocked" | sed 's/^/  · /'
+  else
+    info "最近没有被管理员 IP 规则拦下的请求"
+  fi
+  echo
+  echo "== 7. 最近 403 / 429 但不是管理员 IP 规则（CrowdSec 封禁或限流）"
+  other="$(tail -n 20000 caddy/logs/access.log | grep -E '"status":(403|429)' | grep -vF '"X-Wg-Gate":["admin-only"]' \
+    | sed -E 's/.*"client_ip":"([^"]*)".*"uri":"([^"?]*).*"status":([0-9]+).*/\1 \3 \2/' \
+    | sort | uniq -c | sort -rn | head -n 10)"
+  if [ -n "$other" ]; then
+    echo "$other" | sed 's/^/  · /'
+    info "403：查 docker exec wg-easy-crowdsec cscli decisions list --ip <IP>；429：调大 RL_PUBLIC_PER_MIN"
+  else
+    info "没有"
+  fi
 fi
