@@ -260,7 +260,9 @@ case "${1:-}" in
     echo "== 策略路由（ip rule）"
     ip -4 rule show | sed 's/^/  · /'
     echo
-    nlocal=0
+    nlocal=0; HOST_BAD=0; DOCKER_BAD=0; DL_ON=0
+    BR="$(ip -4 route get 10.42.42.43 2>/dev/null | sed -nE 's/.* dev ([^ ]+).*/\1/p' | head -n 1)"
+    ip -4 rule show | grep -qE 'fwmark 0x1[0-9a-f]/0xff' && DL_ON=1
     for ip in $LIPS; do
       dev="$(ip -4 -o addr show | awk -v ip="$ip" '{split($4, a, "/"); if (a[1] == ip) print $2}' | head -n 1)"
       echo "== 线路 $ip"
@@ -278,42 +280,37 @@ case "${1:-}" in
       odev="$(printf '%s' "$via" | sed -nE 's/.* dev ([^ ]+).*/\1/p')"
       echo "  · 以 $ip 为源地址的回程：${via:-<无路由>}"
       if [ -n "$odev" ] && [ "$odev" != "$dev" ]; then
-        echo "  ✘ 回程从 $odev 出去，不是进来的 $dev：运营商会丢掉源地址不属于它的包，这条线路的连接都会超时"
-        LINE_BAD="${LINE_BAD:-} $ip:$dev"
+        echo "  ✘ 本机进程的回程从 $odev 出去，不是进来的 $dev：先给这条线路配 \"from $ip lookup <表>\" 策略路由"
+        HOST_BAD=1
       else
-        echo "  ✔ 本机发出的回程走 $dev（但经 Docker 转发的连接按目的地址选路，仍可能走默认线路，见下）"
-        LINE_DOCKER="${LINE_DOCKER:-} $ip:$dev"
+        echo "  ✔ 本机进程（如 sshd）的回程走 $dev"
+      fi
+      if [ -n "$BR" ]; then
+        cvia="$(ip -4 route get 1.1.1.1 from 10.42.42.43 iif "$BR" 2>/dev/null | head -n 1)"
+        cdev="$(printf '%s' "$cvia" | sed -nE 's/.* dev ([^ ]+).*/\1/p')"
+        if [ "$DL_ON" = 1 ]; then
+          echo "  · Docker 容器回包：已启用 deploy/dual-line-route.sh（按连接标记选线路），详情 sudo bash deploy/dual-line-route.sh status"
+        elif [ -n "$cdev" ] && [ "$cdev" != "$dev" ]; then
+          echo "  ✘ Docker 容器（Caddy / wg-easy）的回包：$cvia"
+          echo "    从 $cdev 出去，不是 $dev。51821/tcp、51820/udp 是 DNAT 到容器的，回包源地址是 10.42.42.x，"
+          echo "    匹配不到 \"from $ip\" 策略路由，只能走默认路由：普通外网客户端收不到回包"
+          DOCKER_BAD=1
+        else
+          echo "  ✔ Docker 容器回包也走 $dev"
+        fi
       fi
     done
-    if [ "$nlocal" -eq 0 ] && [ "${ndef:-0}" -le 1 ]; then
-      echo
-      echo "== 结论：两条线路都由前置设备转发，本机只有一个默认网关，回程由前置设备的连接跟踪送回原线路，本机不用改"
-      echo "   4G 走第二条线路仍不通时，就是那条线路的端口转发没配 51821/tcp，或者限制了来源 IP"
-    elif [ -n "${LINE_BAD:-}${LINE_DOCKER:-}" ]; then
-      echo
-      echo "== 双线回程修正（按线路打标记，回程查对应线路的路由表）。以下命令只打印，不会执行；先在测试窗口里试，确认后写进开机脚本"
-      tid=200
-      for x in ${LINE_BAD:-} ${LINE_DOCKER:-}; do
-        lip="${x%%:*}"; ldev="${x#*:}"
-        gw="$(ip -4 route show default dev "$ldev" 2>/dev/null | sed -nE 's/.*via ([0-9.]+).*/\1/p' | head -n 1)"
-        net="$(ip -4 route show dev "$ldev" scope link 2>/dev/null | awk 'NR==1 {print $1}')"
-        mark=$(printf '0x%x' "$tid")
-        echo "  # 线路 $lip（$ldev）"
-        [ -n "$gw" ] || echo "  # ⚠ 没找到 $ldev 的网关，把下面的 <网关> 换成这条线路的网关地址"
-        echo "  ip route replace default via ${gw:-<网关>} dev $ldev table $tid"
-        [ -z "$net" ] || echo "  ip route replace $net dev $ldev table $tid"
-        echo "  ip route replace 10.42.42.0/24 dev \$(ip -4 route show 10.42.42.0/24 | awk '{print \$3}') table $tid   # Docker 网桥"
-        echo "  ip rule add from $lip lookup $tid priority $tid"
-        echo "  ip rule add fwmark $mark lookup $tid priority $((tid + 1))"
-        echo "  iptables -t mangle -A PREROUTING -i $ldev -m conntrack --ctstate NEW -j CONNMARK --set-mark $mark"
-        echo "  iptables -t mangle -A PREROUTING ! -i $ldev -m connmark --mark $mark -j CONNMARK --restore-mark"
-        echo "  iptables -t mangle -A OUTPUT -m connmark --mark $mark -j CONNMARK --restore-mark"
-        tid=$((tid + 10))
-      done
-      echo "  sysctl -w net.ipv4.conf.all.rp_filter=2"
-      echo
-      echo "  作用：从某条线路进来的新连接打上标记，回程包（包括 Docker 容器的回应）按标记查这条线路的路由表，从原线路出去"
-      echo "  验证：sudo bash $0 --capture <4G 手机公网IP>，[S] 和 [S.] 应在同一张网卡"
+    echo
+    if [ "$nlocal" -eq 0 ]; then
+      echo "== 结论：线路 IP 都不在本机网卡上，由前置设备转发。本机不用改，检查前置设备的 51821/tcp 转发和来源限制"
+    elif [ "$DOCKER_BAD" = 1 ]; then
+      echo "== 结论：Docker 发布端口的回包走默认路由，不走进来的线路。这就是“只有部分来源能同步配置”的原因"
+      echo "   能用的只有默认网关能路由回去的地址（如公司其他出口 = 管理员白名单里的 IP），和白名单功能本身无关"
+      echo "   修正：sudo bash deploy/dual-line-route.sh apply      # 立即生效；有问题 remove 回退"
+      echo "         sudo bash deploy/dual-line-route.sh install    # 确认没问题后，安装为开机自动生效"
+      echo "   验证：sudo bash deploy/dual-line-route.sh status，再在 4G 下执行下面的 curl"
+    elif [ "$HOST_BAD" = 0 ]; then
+      echo "== 结论：本机进程和 Docker 容器的回程都走原线路"
     fi
     echo
     echo "== 在 4G 热点下的电脑上逐条执行（直接指定线路 IP，绕开智能解析）"

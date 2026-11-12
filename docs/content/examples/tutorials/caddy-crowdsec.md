@@ -278,7 +278,7 @@ bash scripts/diagnose-public.sh --dns vrh.verycloud.cn <Authentik 域名>
 域名按线路解析到两个公网 IP 时（智能解析，例如电信 / 联通走一条、移动走另一条），**两条线路都要能完整访问这套服务**，否则只有一部分用户能同步配置。需要满足三点：
 
 1. **端口转发**：每条线路的出口设备都转发 `51821/tcp` 和 `51820/udp` 到本机，不限制来源 IP。只转发了 `51820/udp` 时，隧道能连上，但同步配置会超时，访问日志里也看不到请求。
-2. **回程走原线路**：本机有两张网卡、两个网关时，从第二条线路进来的连接，回程默认会从第一条线路出去，运营商会丢掉这些包。Docker 容器的回应按目的地址选路，单纯 `ip rule from <IP>` 管不到，需要按连接打标记（CONNMARK）再查对应线路的路由表。两条线路都由同一台前置设备转发、本机只有一个网关时，这一点由前置设备处理，本机不用改。
+2. **回程走原线路**：本机有两张网卡、两个网关时，从第二条线路进来的连接，回程默认会从第一条线路出去，运营商会丢掉这些包。Docker 容器的回应按目的地址选路，单纯 `ip rule from <IP>` 管不到，需要按连接打标记（CONNMARK）再查对应线路的路由表，用 `deploy/dual-line-route.sh` 处理（见下）。两条线路都由同一台前置设备转发、本机只有一个网关时，这一点由前置设备处理，本机不用改。
 3. **hairpin 覆盖所有线路**：`.env` 中 `WG_HAIRPIN_DST4` 填上所有线路 IP，空格分隔，然后重建 wg-easy。
 
 检查：
@@ -288,7 +288,20 @@ sudo bash scripts/diagnose-public.sh --lines          # 自动取 WG_WEB_HOST �
 sudo bash scripts/diagnose-public.sh --capture <4G 手机公网IP>
 ```
 
-`--lines` 判断每个线路 IP 是本机网卡地址还是前置设备转发，检查以它为源地址的回程从哪张网卡出去，需要时打印策略路由和 CONNMARK 命令（只打印、不执行），并给出在 4G 热点下逐条线路测试的 `curl --resolve` 命令。`--capture` 同时抓 SYN 和 SYN-ACK：两者不在同一张网卡，就是回程走错线路。
+`--lines` 判断每个线路 IP 是本机网卡地址还是前置设备转发，检查以它为源地址的回程从哪张网卡出去，并检查 Docker 容器的回包实际从哪张网卡出去，并给出在 4G 热点下逐条线路测试的 `curl --resolve` 命令。`--capture` 同时抓 SYN 和 SYN-ACK：两者不在同一张网卡，就是回程走错线路。
+
+#### 修正 Docker 容器回包的线路
+
+本机已经为每条线路配了 `from <线路IP> lookup <表>`（如 `cmc` / `cuc` / `ctc`）时，本机进程的回包没问题，但 Docker 发布的端口是 DNAT 到容器的：容器回包的源地址是 `10.42.42.x`，匹配不到这些规则，只能走 main 表的默认路由（例如内网网关）。表现为只有默认网关能路由回去的地址（公司其他出口）能同步，4G 等普通外网客户端超时，而且访问日志里看不到请求。
+
+```shell
+sudo bash deploy/dual-line-route.sh status     # 每条线路：规则是否已加、容器回包走哪张网卡
+sudo bash deploy/dual-line-route.sh apply      # 立即生效（幂等）
+sudo bash deploy/dual-line-route.sh install    # 安装 systemd 服务 wg-easy-dual-line，开机自动生效
+sudo bash deploy/dual-line-route.sh remove     # 回退
+```
+
+脚本自动发现 `ip rule` 里的线路（IP 在本机网卡上、对应的表有默认路由），每条线路分配一个标记：从这张网卡进来的新连接打上连接标记，容器的回包恢复标记后按 `fwmark` 查这条线路的表。只改 mangle 表和 `ip rule`，不动 Docker 的 nat / filter 规则，也不影响从内网网卡进来的连接。`firewalld --reload` 会清掉 mangle 规则，之后重新 `apply`（或 `systemctl restart wg-easy-dual-line`）。
 
 ## 第 4 步：验证
 
@@ -648,6 +661,7 @@ bash scripts/sync-upstream.sh --continue  # 手工处理完冲突或检查问题
 | `WG_ADMIN_GATE=off`、不连隧道时，白名单 IP 能同步，非白名单 IP 不能，`--watch` 里没有记录 | App 先直接访问 OIDC 服务（Authentik）登录 / 刷新令牌，再请求 wg-easy。OIDC 的 issuer 只在办公网 / 内网可达（或 Authentik 自己限制了来源 IP）时，外网 App 卡在这一步。用 `--setup` 解码 App 实际使用的 issuer，在非白名单网络上逐条测试；把 Authentik 对外开放（至少 discovery、authorize、token、userinfo、jwks），或换成外网可达的 issuer 地址 |
 | 4G 等外网客户端同步超时、访问日志里没有记录，办公网正常 | 多半是 DNS：域名或 Authentik 有 AAAA 但 IPv6 不通，或智能解析让 4G 线路解析到别的地址。用 `--dns` 检查，删掉 AAAA 或错误的线路记录；见“IPv4 优先（4G 客户端）” |
 | 双线服务器：部分运营商（如 4G）用户同步超时，`--dns` 显示域名解析到两个 IP | 第二条线路没有转发 `51821/tcp`，或回程走错线路。见“双线服务器”，用 `--lines` 和 `--capture` 定位 |
+| 多线服务器：只有公司其他出口（白名单 IP）能同步，4G 超时；`--lines` 显示“Docker 容器回包从 eth3 出去” | 容器回包匹配不到 `from <线路IP>` 策略路由，走了默认路由。`sudo bash deploy/dual-line-route.sh install` |
 
 ## 已知限制
 
