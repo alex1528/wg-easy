@@ -11,7 +11,7 @@ import { hashPassword, isPasswordValid } from '#server/utils/password';
 import type { ID } from '#server/utils/types';
 import { roles, type Role } from '#shared/utils/permissions';
 import { decideOidcRole, MAX_STORED_GROUPS } from '#server/utils/oidcRole';
-import { UserAdminError, removesActiveAdmin } from '#server/utils/userAdmin';
+import { UserAdminError, isActiveAdmin, removesActiveAdmin } from '#server/utils/userAdmin';
 import type { DBType } from '#db/sqlite';
 
 type TxType = Parameters<Parameters<DBType['transaction']>[0]>[0];
@@ -161,7 +161,12 @@ export class UserService {
     return this.#statements.findByUsername.execute({ username });
   }
 
-  async create(username: string, password: string) {
+  async create(
+    username: string,
+    password: string,
+    name?: string | null,
+    role?: Role
+  ) {
     const hash = await hashPassword(password);
 
     return this.#db.transaction(async (tx) => {
@@ -182,8 +187,8 @@ export class UserService {
         password: hash,
         username,
         email: null,
-        name: 'Administrator',
-        role: adminCount === 0 ? roles.ADMIN : roles.CLIENT,
+        name: name || (adminCount === 0 ? 'Administrator' : username),
+        role: role ?? (adminCount === 0 ? roles.ADMIN : roles.CLIENT),
         roleSource: 'manual',
         totpVerified: false,
         enabled: true,
@@ -660,6 +665,47 @@ export class UserService {
       await tx.update(user).set(next).where(eq(user.id, target.id)).execute();
 
       return { before: target, after: { ...target, ...next } };
+    });
+  }
+
+  /**
+   * Delete a user and all of their clients.
+   * @throws {UserAdminError}
+   */
+  async adminDelete(actorId: ID, targetId: ID) {
+    return this.#db.transaction(async (tx) => {
+      const target = await tx.query.user
+        .findFirst({ where: eq(user.id, targetId) })
+        .execute();
+
+      if (!target) {
+        throw new UserAdminError('NOT_FOUND');
+      }
+      // don't lock yourself out
+      if (target.id === actorId) {
+        throw new UserAdminError('SELF');
+      }
+      if (
+        isActiveAdmin(target) &&
+        (await this.#countActiveAdmins(tx, target.id)) === 0
+      ) {
+        throw new UserAdminError('LAST_ADMIN');
+      }
+
+      // clients reference the user (onDelete: restrict) → remove them first
+      const deletedClients = await tx
+        .delete(client)
+        .where(eq(client.userId, target.id))
+        .returning({ id: client.id })
+        .execute();
+
+      await tx.delete(user).where(eq(user.id, targetId)).execute();
+
+      console.info(
+        `User change: target=${target.id}(${JSON.stringify(target.username)}) by=user=${actorId} deleted (clients=${deletedClients.length})`
+      );
+
+      return { deletedClients: deletedClients.length };
     });
   }
 

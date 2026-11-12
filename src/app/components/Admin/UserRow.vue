@@ -272,6 +272,12 @@ const actions = computed(() => {
     });
   }
 
+  result.push({
+    id: 'delete',
+    label: t('admin.users.delete'),
+    disabledReason: self ?? lastAdmin,
+  });
+
   return result;
 });
 
@@ -281,6 +287,15 @@ const _submit = useSubmit(
       method: 'post',
       body,
     }),
+  {
+    revert: async () => {
+      emit('changed');
+    },
+  }
+);
+
+const _deleteUser = useSubmit(
+  () => $fetch(`/api/admin/users/${props.user.id}`, { method: 'delete' }),
   {
     revert: async () => {
       emit('changed');
@@ -300,6 +315,8 @@ function run(action: UserAction) {
       return _submit({ action: 'setEnabled', enabled: false });
     case 'enable':
       return _submit({ action: 'setEnabled', enabled: true });
+    case 'delete':
+      return _deleteUser(undefined);
   }
 }
 </script>
