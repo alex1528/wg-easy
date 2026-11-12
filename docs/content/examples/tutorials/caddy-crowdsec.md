@@ -478,7 +478,8 @@ docker restart wg-easy-crowdsec wg-easy-caddy  # 3. 两边同时生效
 bash scripts/diagnose-public.sh                     # 默认检查 /api/livewireguard/config
 bash scripts/diagnose-public.sh /api/auth/oidc/callback
 bash scripts/diagnose-public.sh --ip <客户端公网IP>    # 这个 IP 最近的全部请求
-bash scripts/diagnose-public.sh --watch <客户端公网IP> # 实时观察，运行后在客户端点同步
+bash scripts/diagnose-public.sh --watch               # 实时观察：启动时先发一个自检请求，看到自检记录后再去客户端点同步
+bash scripts/diagnose-public.sh --watch <客户端公网IP> # 只看这个 IP 的请求
 ```
 
 脚本依次检查：容器里的 Caddyfile 和管理员名单是不是新版、路径是否在 `WG_PUBLIC_PATHS` 里、wg-easy 自己对这个路径返回什么、经过 Caddy 返回什么、访问日志和 CrowdSec 封禁，最后列出最近被管理员 IP 规则拦下的路径（客户端需要但没有开放的路径就在这里），并检查 OIDC 服务能否访问。客户端同步超时，而 `--watch` 里没有出现任何请求，说明请求根本没到这台服务器：检查客户端填的服务器地址、上游防火墙或安全组，以及客户端所在网络能否访问 OIDC 服务（第 8 步给出了测试命令）。经过 Caddy 的结果这样看：

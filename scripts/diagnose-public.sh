@@ -14,17 +14,31 @@ cd "$(dirname "$0")/.."
 
 LOG=caddy/logs/access.log
 
-# 把 Caddy 的 JSON 访问日志转成一行：时间 来源IP 方法 主机 路径 状态 耗时
+# 把 Caddy 的 JSON 访问日志转成一行：时间 来源IP 方法 状态 路径 耗时 主机 客户端
+# 各字段单独匹配，不依赖 JSON 字段顺序；解析不了的行原样显示（以 ? 开头），不会被静默丢掉
+RE_TS='"ts":([0-9]+)'
+RE_IP='"client_ip":"([^"]*)"'
+RE_M='"method":"([A-Z]+)"'
+RE_H='"host":"([^"]*)"'
+RE_U='"uri":"([^"?]*)'
+RE_S='"status":([0-9]+)'
+RE_D='"duration":([0-9.eE+-]+)'
+RE_UA='"User-Agent":\["([^"]*)"'
+m() { if [[ "$line" =~ $1 ]]; then R="${BASH_REMATCH[1]}"; else R=""; fi; }
 fmt() {
-  sed -u -E 's/.*"ts":([0-9]+)[0-9.]*,.*"client_ip":"([^"]*)".*"method":"([A-Z]+)".*"host":"([^"]*)".*"uri":"([^"?]*)[^"]*".*"duration":([0-9.e-]+).*"status":([0-9]+).*/\1 \2 \3 \4 \5 \7 \6/' \
-  | while read -r ts ip m h u s d; do
-      case "$ts" in *[!0-9]*|"") continue ;; esac
-      printf '  · %s  %-15s %-6s %-4s %-40s %ss  %s\n' \
-        "$(date -d "@$ts" +%m-%d\ %H:%M:%S 2>/dev/null || echo "$ts")" "$ip" "$m" "$s" "$u" "$(printf '%.2f' "$d" 2>/dev/null || echo "$d")" "$h"
-    done
+  local line R ts ip me h u s d ua tm
+  while IFS= read -r line; do
+    m "$RE_TS"; ts=$R
+    if [ -z "$ts" ]; then printf '  ? %s\n' "${line:0:200}"; continue; fi
+    m "$RE_IP"; ip=$R; m "$RE_M"; me=$R; m "$RE_H"; h=$R; m "$RE_U"; u=$R
+    m "$RE_S"; s=$R; m "$RE_D"; d=$R; m "$RE_UA"; ua=$R
+    printf -v tm '%(%m-%d %H:%M:%S)T' "$ts" 2>/dev/null || tm=$ts
+    printf -v d '%.2f' "${d:-0}" 2>/dev/null || true
+    printf '  · %s  %-15s %-6s %-4s %-40s %6ss  %s  %s\n' "$tm" "$ip" "$me" "${s:-?}" "$u" "$d" "$h" "${ua:0:40}"
+  done
 }
 legend() {
-  echo "  列：时间 来源IP 方法 状态 路径 耗时 主机"
+  echo "  列：时间 来源IP 方法 状态 路径 耗时 主机 客户端(User-Agent)"
   echo "  状态 0 = 请求处理完之前连接已断开（客户端先超时放弃了，看耗时）；403 = 被拦；429 = 限流；502/504 = 后端问题"
 }
 
@@ -48,13 +62,29 @@ case "${1:-}" in
   --watch)
     IP="${2:-}"
     [ -f "$LOG" ] || { echo "没有 $LOG"; exit 1; }
-    echo "实时显示${IP:+ $IP 的}请求，现在去客户端点“立即同步配置”，Ctrl+C 结束"
+    H="$(docker exec wg-easy-caddy printenv WG_WEB_HOST 2>/dev/null || true)"
+    echo "实时显示${IP:+ $IP 的}请求，Ctrl+C 结束"
     legend
+    # 非交互 shell 里后台进程会忽略 Ctrl+C，所以收到信号时结束整个进程组
+    trap 'trap - INT TERM; kill 0 2>/dev/null' INT TERM
     if [ -n "$IP" ]; then
-      tail -n 0 -F "$LOG" | grep --line-buffered -F "\"client_ip\":\"$IP\"" | fmt
+      tail -n 0 -F "$LOG" 2>/dev/null | grep --line-buffered -F "\"client_ip\":\"$IP\"" | fmt &
     else
-      tail -n 0 -F "$LOG" | fmt
+      tail -n 0 -F "$LOG" 2>/dev/null | fmt &
     fi
+    sleep 1
+    # 自检：从本机发一个请求，证明这个工具本身能看到请求
+    if [ -n "$H" ] && command -v curl >/dev/null 2>&1; then
+      curl -sk -o /dev/null --max-time 8 -A diagnose-selftest --resolve "$H:51821:127.0.0.1" "https://$H:51821/api/livewireguard/config" || true
+      sleep 1
+      if [ -n "$IP" ]; then
+        echo "  （已发自检请求，它的来源不是 $IP，被过滤掉了；想看自检就去掉 IP 参数）"
+      else
+        echo "  （已发自检请求：屏幕上应出现一行客户端为 diagnose-selftest 的记录；没有出现说明访问日志没写到 $LOG）"
+      fi
+    fi
+    echo "  现在去客户端点“立即同步配置”"
+    wait
     exit 0
     ;;
   -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
