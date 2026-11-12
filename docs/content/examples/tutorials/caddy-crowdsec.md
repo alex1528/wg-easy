@@ -567,6 +567,7 @@ docker compose -f docker-compose-dirty.yml up -d --force-recreate crowdsec caddy
 ```shell
 bash scripts/sync-upstream.sh --dry-run   # 先预览：待合并的提交、两边都改过的文件、git 预测的冲突
 bash scripts/sync-upstream.sh             # 合并并提交（自动打版本 tag），不推送
+bash scripts/sync-upstream.sh --continue  # 手工处理完冲突或检查问题后，重新检查并提交
 ```
 
 脚本会添加名为 `feng` 的远程，拉取后用 `git merge` 合并（保留双方历史，以后可以反复同步）。冲突按下面的规则自动处理：
@@ -578,7 +579,7 @@ bash scripts/sync-upstream.sh             # 合并并提交（自动打版本 ta
 | `.env.example` | 保留本库，再追加上游新增的变量 |
 | 其余文件（wg-easy 源码、文档、构建文件） | 采用上游 |
 
-合并前会建备份分支 `backup/pre-sync-<时间>`；合并后检查脚本语法、管理员 IP 名单、换行符和 compose 文件，不通过就不提交。脚本最后会列出“只有本库有的 src 文件”和“本库改动被上游覆盖的文件”，需要人工确认。想全部手工解决冲突时加 `--manual`；上游改用 GitHub 地址时设置 `FENG_URL=https://github.com/feng905/wg-easy.git`。
+合并前会建备份分支 `backup/pre-sync-<时间>`；合并后检查本库脚本语法、管理员 IP 名单、部署文件换行符、compose 文件，以及本库自有的 src 改动引用的模块和 `Database.*` 方法在合并结果里是否还存在。检查不通过就不提交，合并结果留在工作区：处理后运行 `--continue`，放弃则 `git merge --abort`。脚本最后会列出“只有本库有的 src 文件”和“本库改动被上游覆盖的文件”，需要人工确认。想全部手工解决冲突时加 `--manual`；上游改用 GitHub 地址时设置 `FENG_URL=https://github.com/feng905/wg-easy.git`。
 
 合并后先构建 wg-easy 镜像验证（`docker build -t wg-easy:sync-test .`），没问题再推送；有问题执行 `git reset --hard backup/pre-sync-<时间>` 回退。
 
