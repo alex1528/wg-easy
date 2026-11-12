@@ -127,7 +127,9 @@
 		# 管理员 IP：caddy/admin-ips.caddy，由 scripts/admin-ips.sh 根据 CrowdSec 管理员白名单生成，两边是同一份名单
 		# 公开接口：WG_PUBLIC_PATHS（空格分隔），默认同步配置接口和一次性配置链接，只放行 GET / HEAD
 		#   公开接口仍受 CrowdSec 封禁、限流和 wg-easy 自身认证的约束
-		# 两个条件都不满足的请求直接断开连接
+		# 两个条件都不满足的请求返回 403，带 X-Wg-Gate: admin-only 头，
+		#   便于和 CrowdSec 封禁（403，无此头）、限流（429）、wg-easy 自身的错误区分
+		#   排查：bash scripts/diagnose-public.sh
 		@blocked {
 			not {
 				import /etc/caddy/admin-ips.caddy
@@ -137,7 +139,8 @@
 				method GET HEAD
 			}
 		}
-		abort @blocked
+		header @blocked X-Wg-Gate "admin-only"
+		respond @blocked "Forbidden: admin IP only" 403
 
 		# ---------- 2. Prometheus 指标仅内网可访问 ----------
 		@metrics_public {
