@@ -53,11 +53,18 @@ const description = computed(() => {
       return t('admin.users.disableDesc', { name: name.value });
     case 'enable':
       return t('admin.users.enableDesc', { name: name.value });
+    case 'delete':
+      return t('admin.users.deleteDesc', { name: name.value });
   }
   return '';
 });
 
 const note = computed(() => {
+  if (props.action === 'delete') {
+    return props.user.clientCount > 0
+      ? t('admin.users.deleteNote', { count: props.user.clientCount })
+      : t('admin.users.deleteNoteNone');
+  }
   if (props.action === 'promote' || props.action === 'demote') {
     return props.user.roleSource === 'oidc' ? t('admin.users.manualNote') : '';
   }

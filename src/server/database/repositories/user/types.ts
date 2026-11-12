@@ -109,3 +109,14 @@ export const UserAdminUpdateSchema = z.discriminatedUnion('action', [
 ]);
 
 export type UserAdminUpdateType = z.infer<typeof UserAdminUpdateSchema>;
+
+export const UserAdminCreateSchema = z.object({
+  username: username,
+  password: password,
+  name: name.optional(),
+  role: z
+    .enum(['ADMIN', 'CLIENT'], { message: t('zod.user.role') })
+    .default('CLIENT'),
+});
+
+export type UserAdminCreateType = z.infer<typeof UserAdminCreateSchema>;

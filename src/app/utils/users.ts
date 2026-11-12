@@ -9,7 +9,12 @@ export type AdminUserList = TypedInternalResponse<
 export type AdminUser = AdminUserList['users'][number];
 
 export type UserAction =
-  'promote' | 'demote' | 'followOidc' | 'disable' | 'enable';
+  | 'promote'
+  | 'demote'
+  | 'followOidc'
+  | 'disable'
+  | 'enable'
+  | 'delete';
 
 /** SQLite CURRENT_TIMESTAMP is UTC without timezone */
 export function parseDbDate(value: string | null | undefined) {
