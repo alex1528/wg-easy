@@ -271,6 +271,10 @@ case "${1:-}" in
     echo "== 策略路由（ip rule，共 $(grep -c . <<<"$RULES_NOW") 条；相同规则合并显示，括号里是条数）"
     sed -E 's/^[0-9]+:[[:space:]]+//' <<<"$RULES_NOW" | awk '{c[$0]++; if (c[$0] == 1) o[++n] = $0} END {for (i = 1; i <= n; i++) printf "  · %s%s\n", o[i], (c[o[i]] > 1 ? "  (" c[o[i]] ")" : "")}' | head -n 60
     nfw="$(grep -cE 'from all fwmark 0x[0-9a-f]+/0xff lookup' <<<"$RULES_NOW" || true)"
+    ndup="$(sed -E 's/^[0-9]+:[[:space:]]+//' <<<"$RULES_NOW" | grep -E '^from [0-9.]+' | sort | uniq -d | grep -c . || true)"
+    if [ "${ndup:-0}" -gt 0 ]; then
+      echo "  ⚠ 有 $ndup 组 from 规则被重复添加：sudo bash deploy/dual-line-route.sh dedupe 查看来源，apply 时会自动清理"
+    fi
     echo
     nlocal=0; HOST_BAD=0; DOCKER_BAD=0; DL_ON=0; RPF_BAD=0
     CIP_L="${TRACE_CADDY_IP:-10.42.42.43}"

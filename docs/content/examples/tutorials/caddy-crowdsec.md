@@ -305,6 +305,22 @@ sudo bash deploy/dual-line-route.sh remove     # 回退
 
 脚本自动发现 `ip rule` 里的线路（IP 在本机网卡上、对应的表有默认路由），每条线路分配一个标记：从这张网卡进来的新连接打上连接标记，容器的回包恢复标记后按 `fwmark` 查这条线路的表；同时把线路网卡的 `rp_filter` 设为 `2`（宽松，`remove` 时恢复原值）。只改 mangle 表和 `ip rule`，不动 Docker 的 nat / filter 规则，也不影响从内网网卡进来的连接。`firewalld --reload` 会清掉 mangle 规则，之后重新 `apply`（或 `systemctl restart wg-easy-dual-line`）。
 
+#### 清理重复的策略路由
+
+`ip rule` 里同一条 `from <线路IP> lookup <表>` 出现几十次，说明添加它的配置每次执行都直接 `ip rule add`，没有先判断是否已存在。功能上不影响，但规则越积越多、排查困难，也会让 0.2.4 及以前的 `dual-line-route.sh` 误判线路数。
+
+```shell
+sudo bash deploy/dual-line-route.sh dedupe   # 只查看：重复的规则、计划删除哪些、是哪个配置在重复添加
+sudo bash deploy/dual-line-route.sh apply    # 先清理（每组只保留优先级数字最大的那条），再添加线路规则
+```
+
+`apply`（包括 `install` 后开机自动执行的 `apply`）默认都会先清理重复规则；不想清理时加环境变量 `DUAL_LINE_DEDUPE=0`，例如 `sudo DUAL_LINE_DEDUPE=0 bash deploy/dual-line-route.sh install`。清理掉的重复规则 `remove` 不会加回来。
+
+清理前后对每个线路 IP 执行 `ip route get 1.1.1.1 from <IP>`，选路结果有任何变化就把删除的规则全部加回去；不碰 local / main / default 和 fwmark 规则。它只清理当前生效的规则，还要修正来源，否则下次网络重启又会重复：
+
+- CentOS / RHEL 的 `/etc/sysconfig/network-scripts/rule-<网卡>`：每行加固定优先级，例如 `from 112.82.212.165 table cuc priority 1001`。带固定优先级后，较新的内核会拒绝重复添加完全相同的规则
+- 脚本、`rc.local`、`/etc/network/interfaces` 的 `post-up`、crontab：改成先删干净再加，`while ip rule del from <IP> lookup <表> 2>/dev/null; do :; done; ip rule add from <IP> lookup <表> priority <固定数字>`
+
 ## 第 4 步：验证
 
 下面的 `<WG_WEB_HOST>` 换成 `.env` 中的值。`internal` 模式下 curl 需要加 `-k`。
@@ -666,7 +682,7 @@ bash scripts/sync-upstream.sh --continue  # 手工处理完冲突或检查问题
 | 双线服务器：部分运营商（如 4G）用户同步超时，`--dns` 显示域名解析到两个 IP | 第二条线路没有转发 `51821/tcp`，或回程走错线路。见“双线服务器”，用 `--lines` 和 `--capture` 定位 |
 | 多线服务器：只有公司其他出口（白名单 IP）能同步，4G 超时；`--lines` 显示“Docker 容器回包从 eth3 出去” | 容器回包匹配不到 `from <线路IP>` 策略路由，走了默认路由。`sudo bash deploy/dual-line-route.sh install` |
 | 多线服务器：`dual-line-route.sh status` 显示回包路由正确，4G 仍 TCP 超时 | 线路网卡 `rp_filter=1`，DNAT 到容器的 SYN 被内核丢弃。`sudo bash scripts/diagnose-public.sh --trace` 确认（“rp_filter 新增丢包”大于 0），再 `sudo bash deploy/dual-line-route.sh apply` |
-| `ip rule` 里有大量 `fwmark 0x../0xff` 规则（几十上百条） | 系统里同一条 `from <线路IP> lookup <表>` 被重复添加过多次，0.2.4 版 `dual-line-route.sh` 把每一份重复都当成一条线路。更新到 0.2.5 后执行 `sudo bash deploy/dual-line-route.sh apply`，会先清理本脚本加过的全部规则，再按去重后的线路重建；系统自己的重复 `from` 规则不影响功能，`status` 会列出来 |
+| `ip rule` 里有大量 `fwmark 0x../0xff` 规则（几十上百条） | 系统里同一条 `from <线路IP> lookup <表>` 被重复添加过多次，0.2.4 版 `dual-line-route.sh` 把每一份重复都当成一条线路。更新到 0.2.5 后执行 `sudo bash deploy/dual-line-route.sh apply`，会先清理本脚本加过的全部规则，再按去重后的线路重建；系统自己的重复 `from` 规则不影响功能，0.2.7 起 `apply` 会顺带清理，用 `sudo bash deploy/dual-line-route.sh dedupe` 查找来源 |
 
 ## 已知限制
 
