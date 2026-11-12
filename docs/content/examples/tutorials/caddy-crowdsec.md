@@ -483,6 +483,8 @@ bash scripts/diagnose-public.sh /api/auth/oidc/callback
 bash scripts/diagnose-public.sh --ip <客户端公网IP>    # 这个 IP 最近的全部请求
 bash scripts/diagnose-public.sh --watch               # 实时观察：启动时先发一个自检请求，看到自检记录后再去客户端点同步
 bash scripts/diagnose-public.sh --watch <客户端公网IP> # 只看这个 IP 的请求
+sudo bash scripts/diagnose-public.sh --capture        # 抓发往 51821 的新 TCP 连接，和 --watch 对照
+bash scripts/diagnose-public.sh --oidc                # 列出 OIDC 端点，生成在客户端网络上执行的测试命令
 ```
 
 脚本依次检查：容器里的 Caddyfile 和管理员名单是不是新版、路径是否在 `WG_PUBLIC_PATHS` 里、wg-easy 自己对这个路径返回什么、经过 Caddy 返回什么、访问日志和 CrowdSec 封禁，最后列出最近被管理员 IP 规则拦下的路径（客户端需要但没有开放的路径就在这里），并检查 OIDC 服务能否访问。客户端同步超时，而 `--watch` 里没有出现任何请求，说明请求根本没到这台服务器：检查客户端填的服务器地址、上游防火墙或安全组，以及客户端所在网络能否访问 OIDC 服务（第 8 步给出了测试命令）。经过 Caddy 的结果这样看：
@@ -558,6 +560,28 @@ docker compose -f docker-compose-dirty.yml up -d --force-recreate crowdsec caddy
 | `.env`                | 所有配置和密钥                           |
 | `crowdsec_config` 卷  | CrowdSec 配置（可选，丢失后会自动重建）  |
 
+### 同步上游 wg-easy（wg-easy-feng）
+
+本库的 wg-easy 程序本身以 `feng905/wg-easy` 的 `LiveWireGuard` 分支为上游（本机目录 `../wg-easy-feng`），本库只在其上叠加 Caddy、CrowdSec 等部署层。同步上游改动：
+
+```shell
+bash scripts/sync-upstream.sh --dry-run   # 先预览：待合并的提交、两边都改过的文件、git 预测的冲突
+bash scripts/sync-upstream.sh             # 合并并提交（自动打版本 tag），不推送
+```
+
+脚本会添加名为 `feng` 的远程，拉取后用 `git merge` 合并（保留双方历史，以后可以反复同步）。冲突按下面的规则自动处理：
+
+| 文件 | 处理 |
+| ---- | ---- |
+| `caddy/`、`crowdsec/`、`deploy/`、本库脚本、`docker-compose-dirty.yml`、本部署文档、`.gitattributes`、`.githooks/` | 保留本库 |
+| `.gitignore` | 两边的行取并集 |
+| `.env.example` | 保留本库，再追加上游新增的变量 |
+| 其余文件（wg-easy 源码、文档、构建文件） | 采用上游 |
+
+合并前会建备份分支 `backup/pre-sync-<时间>`；合并后检查脚本语法、管理员 IP 名单、换行符和 compose 文件，不通过就不提交。脚本最后会列出“只有本库有的 src 文件”和“本库改动被上游覆盖的文件”，需要人工确认。想全部手工解决冲突时加 `--manual`；上游改用 GitHub 地址时设置 `FENG_URL=https://github.com/feng905/wg-easy.git`。
+
+合并后先构建 wg-easy 镜像验证（`docker build -t wg-easy:sync-test .`），没问题再推送；有问题执行 `git reset --hard backup/pre-sync-<时间>` 回退。
+
 ## 排错
 
 | 现象                                                         | 原因和处理                                                                                                                                 |
@@ -585,6 +609,7 @@ docker compose -f docker-compose-dirty.yml up -d --force-recreate crowdsec caddy
 | 管理员打不开后台（403，带 `X-Wg-Gate: admin-only` 头），同步配置正常 | 当前出口 IP 不在 CrowdSec 管理员白名单里，或改了名单后没有运行 `bash scripts/admin-ips.sh` 并重启 Caddy。连着 VPN 隧道时来源是 `10.42.42.42`，同样会被拦下 |
 | 非管理员 IP 的客户端同步配置失败，curl 测 `/api/livewireguard/config` 却正常 | 客户端同步还会访问别的路径（如 OIDC 登录 `/api/auth/oidc/callback`）。运行 `bash scripts/diagnose-public.sh` 看第 6 步列出的被拦路径，加进 `WG_PUBLIC_PATHS` |
 | 非管理员 IP 同步超时，访问日志里没有这个客户端的请求 | 请求没到 Caddy：客户端连的是另一台服务器、上游防火墙只放行部分来源，或者 OIDC 服务（Authentik）只对内网开放，客户端拿不到令牌。用 `diagnose-public.sh --watch` 和第 8 步定位 |
+| 设置 `WG_ADMIN_GATE=off` 后非白名单客户端仍同步超时，`--watch` 里没有记录 | 请求没进入 Caddy 的 HTTP 处理：用 `--capture` 看有没有 TCP 新连接（有 = TLS 握手失败；没有 = 没到服务器），用 `--oidc` 生成的命令在客户端网络上测 OIDC 各端点 |
 
 ## 已知限制
 

@@ -6,6 +6,8 @@
 #   bash scripts/diagnose-public.sh /api/auth/oidc/callback  # 检查其他路径
 #   bash scripts/diagnose-public.sh --ip <客户端公网IP>      # 列出这个 IP 最近的全部请求（看客户端同步时访问了什么）
 #   bash scripts/diagnose-public.sh --watch [客户端公网IP]   # 实时显示请求：运行后在客户端点“立即同步配置”
+#   sudo bash scripts/diagnose-public.sh --capture [客户端公网IP]  # 抓 TCP 新连接：和 --watch 对照，区分“没到服务器”和“TLS 握手失败”
+#   bash scripts/diagnose-public.sh --oidc                   # 列出客户端登录要访问的 OIDC 端点，并生成在客户端网络上执行的测试命令
 #
 # 客户端同步超时、但 --watch 里什么都没出现：请求根本没到这台服务器的 Caddy，
 #   问题在客户端连的地址、DNS、上游防火墙/安全组，或者客户端卡在 OIDC 登录（第 8 步）
@@ -87,7 +89,51 @@ case "${1:-}" in
     wait
     exit 0
     ;;
-  -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+  --capture)
+    IP="${2:-}"
+    command -v tcpdump >/dev/null 2>&1 || { echo "需要 tcpdump：apt install -y tcpdump（CentOS：yum install -y tcpdump）"; exit 1; }
+    [ "$(id -u)" = 0 ] || { echo "需要 root：sudo bash $0 --capture ${IP}"; exit 1; }
+    # 只抓“发往 51821 的 SYN”（每次新连接一行）；去掉 Docker 转发到容器后的第二份（目的 10.42.42.0/24）和本机自测
+    F='tcp dst port 51821 and (tcp[tcpflags] & (tcp-syn|tcp-ack)) == tcp-syn and not dst net 10.42.42.0/24 and not src net 10.42.42.0/24 and not src host 127.0.0.1'
+    [ -z "$IP" ] || F="$F and src host $IP"
+    echo "抓取发往 51821 的新 TCP 连接${IP:+（只看 $IP）}，Ctrl+C 结束"
+    echo "  建议另开一个终端同时运行：bash scripts/diagnose-public.sh --watch"
+    echo "  · 这里有记录、--watch 没有  = TCP 到了，TLS 握手失败（证书/SNI/客户端 TLS 设置），看 docker logs wg-easy-caddy"
+    echo "  · 这里也没有记录            = 请求没到这台服务器（客户端连的地址、上游防火墙/安全组/端口转发，或卡在 OIDC 登录：--oidc）"
+    echo "  现在去客户端点“立即同步配置”"
+    exec tcpdump -lnni any "$F"
+    ;;
+  --oidc)
+    OIDC="$(docker exec wg-easy printenv OAUTH_OIDC_SERVER 2>/dev/null || true)"
+    [ -n "$OIDC" ] || { echo "wg-easy 没有设置 OAUTH_OIDC_SERVER"; exit 1; }
+    DISC="${OIDC%/}/.well-known/openid-configuration"
+    echo "== OIDC 服务：$OIDC"
+    DJSON="$(docker exec wg-easy wget -q -T 8 -O - "$DISC" 2>/dev/null || true)"
+    URLS="$DISC"
+    if [ -z "$DJSON" ]; then
+      echo "  ✘ 从服务器取不到发现文档：$DISC"
+    else
+      echo "  ✔ 从服务器取到发现文档"
+      for k in authorization_endpoint token_endpoint userinfo_endpoint jwks_uri; do
+        v="$(printf '%s' "$DJSON" | grep -oE "\"$k\" *: *\"[^\"]+\"" | head -n 1 | sed -E 's/.*: *"([^"]+)"/\1/')"
+        [ -z "$v" ] || { echo "  · $k: $v"; URLS="$URLS $v"; }
+      done
+    fi
+    W_HOST="$(docker exec wg-easy-caddy printenv WG_WEB_HOST 2>/dev/null || true)"
+    [ -z "$W_HOST" ] || URLS="$URLS https://$W_HOST:51821/api/livewireguard/config"
+    echo
+    echo "== 在客户端所在网络执行（手机 4G 热点下的电脑；或手机浏览器逐个打开）"
+    echo "   任何 HTTP 状态码（200/302/400/401/405）都说明网络通；000 或超时说明这个地址对该网络不可达"
+    echo "-----------------------------------------------------------------"
+    for u in $URLS; do
+      printf "curl -sS -o /dev/null -m 10 -w '%%{http_code} %%{time_total}s  %s\\\\n' '%s'\n" "$u" "$u"
+    done
+    echo "-----------------------------------------------------------------"
+    echo "   客户端同步前要先在浏览器里打开 authorization_endpoint 登录，再由客户端访问 token / userinfo / jwks，"
+    echo "   最后才请求 wg-easy。OIDC 任一端点不可达，客户端就会超时，wg-easy / Caddy 日志里也不会有记录"
+    exit 0
+    ;;
+  -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
 esac
 
 P="${1:-/api/livewireguard/config}"
@@ -241,4 +287,5 @@ else
   info "客户端也要能访问它。在非管理员网络（如手机 4G）上执行："
   info "  curl -sS -o /dev/null -w '%{http_code} %{time_total}s\\n' $DISC"
   info "超时说明 OIDC 服务只对办公网/内网开放：客户端拿不到令牌，同步就会超时，请求也不会出现在本机 Caddy 日志里"
+  info "完整的端点列表和测试命令：bash scripts/diagnose-public.sh --oidc"
 fi
