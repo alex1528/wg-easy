@@ -1,7 +1,11 @@
 name: Image
 
-# 仅在推送 v* 标签时自动打包发布，标签: v1.2.3 / 1.2 / 1 + latest
-# 手动 workflow_dispatch 时打 sha-<短哈希> + latest（用于验证 workflow）
+# 版本唯一来源：package.json 的 version 字段（同一字段构建时打进镜像，显示在管理页页脚）
+# 触发条件（满足其一）：
+#   - 推送 master / LiveWireGuard 且 package.json 的 version 发生变化
+#   - 推送 v* 标签（标签名必须等于 v+package.json version，否则构建失败，杜绝两者割裂）
+#   - 手动 workflow_dispatch（用于验证 workflow）
+# 镜像标签: 1.2.3 / 1.2 / 1 / latest / sha-<短哈希>（与本地 `make deploy` 完全一致）
 #
 # 镜像仓库通过仓库 Variables 配置（Settings -> Secrets and variables -> Actions），
 # 支持任意 registry：腾讯云 TCR、阿里云 ACR、Docker Hub、自建 Harbor 等：
@@ -18,6 +22,9 @@ name: Image
 on:
   workflow_dispatch:
   push:
+    branches:
+      - master
+      - LiveWireGuard
     tags:
       - "v*"
 
@@ -27,19 +34,36 @@ concurrency:
 
 jobs:
   config:
-    name: Resolve image
+    name: Resolve version & image
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.cfg.outputs.image }}
       registry: ${{ steps.cfg.outputs.registry }}
+      version: ${{ steps.cfg.outputs.version }}
+      majorMinor: ${{ steps.cfg.outputs.majorMinor }}
+      major: ${{ steps.cfg.outputs.major }}
+      changed: ${{ steps.cfg.outputs.changed }}
     steps:
-      - name: Resolve full image name
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 2 # 需要 HEAD~1 对比 version 是否变化
+
+      - name: Resolve version and image name
         id: cfg
         env:
           REGISTRY: ${{ vars.DOCKER_REGISTRY }}
           NAMESPACE: ${{ vars.DOCKER_NAMESPACE }}
           IMAGE: ${{ vars.DOCKER_IMAGE }}
         run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::package.json version 不是 x.y.z 格式: $VERSION"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "majorMinor=${VERSION%.*}" >> "$GITHUB_OUTPUT"
+          echo "major=${VERSION%%.*}" >> "$GITHUB_OUTPUT"
+
           NAME="${IMAGE:-wg-easy}"
           if [ -n "$REGISTRY" ]; then
             echo "image=${REGISTRY}/${NAMESPACE:?需要设置 Variable DOCKER_NAMESPACE}/${NAME}" >> "$GITHUB_OUTPUT"
@@ -49,12 +73,35 @@ jobs:
             echo "registry=" >> "$GITHUB_OUTPUT"
           fi
 
+          # —— 触发判定 ——
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            # 标签必须与 package.json 版本一致：只允许 v+version 的标签触发发布
+            if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+              echo "::error::标签 $GITHUB_REF_NAME 与 package.json version (v$VERSION) 不一致。请先改 package.json 的 version，再打对应标签。"
+              exit 1
+            fi
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            PREV=$(git show 'HEAD~1:package.json' 2>/dev/null \
+              | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" || echo "")
+            if [ "$PREV" != "$VERSION" ]; then
+              echo "版本变化: ${PREV:-无} -> $VERSION，开始构建"
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "package.json version 未变化（$VERSION），跳过构建"
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
   docker-build:
     name: Build Docker (${{ matrix.arch.platform }})
     runs-on: ${{ matrix.arch.os }}
     permissions:
       contents: read
     needs: [config]
+    if: needs.config.outputs.changed == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -121,6 +168,7 @@ jobs:
     permissions:
       contents: read
     needs: [config, docker-build]
+    if: needs.config.outputs.changed == 'true'
     steps:
       - name: Download digests
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -145,8 +193,8 @@ jobs:
             echo "$PASSWORD" | docker login --username "$USERNAME" --password-stdin
           fi
 
-      # 手动 dispatch: sha-<短哈希> + latest
-      # 推送 v* 标签: v1.2.3 / 1.2 / 1 + latest
+      # 所有触发方式统一：version 来自 package.json
+      # 镜像标签: 1.2.3 / 1.2 / 1 / latest / sha-<短哈希>
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
@@ -156,10 +204,10 @@ jobs:
             latest=false
           tags: |
             type=raw,value=latest
-            type=sha,enable=${{ !startsWith(github.ref, 'refs/tags/') }}
-            type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
-            type=semver,pattern={{major}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=${{ needs.config.outputs.version }}
+            type=raw,value=${{ needs.config.outputs.majorMinor }}
+            type=raw,value=${{ needs.config.outputs.major }}
+            type=sha
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
@@ -184,14 +232,17 @@ jobs:
   notify:
     name: Notify
     runs-on: ubuntu-latest
-    if: always()
-    needs: [docker-merge]
+    if: always() && needs.docker-merge.result != 'skipped'
+    needs: [config, docker-merge]
     steps:
       - name: Send Lark notification
         continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
           RESULT: ${{ needs.docker-merge.result }}
+          VERSION: ${{ needs.config.outputs.version }}
+          MAJORMINOR: ${{ needs.config.outputs.majorMinor }}
+          MAJOR: ${{ needs.config.outputs.major }}
           REGISTRY: ${{ vars.DOCKER_REGISTRY }}
           NAMESPACE: ${{ vars.DOCKER_NAMESPACE }}
           IMAGE_NAME: ${{ vars.DOCKER_IMAGE }}
@@ -211,21 +262,12 @@ jobs:
             cancelled) ICON="⏹"; STATUS="已取消" ;;
             *)         ICON="❌"; STATUS="失败（job: ${RESULT}）" ;;
           esac
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            VER="${GITHUB_REF_NAME#v}"
-            MAJOR="${VER%%.*}"
-            if [[ "$VER" == *.* ]]; then MINOR="${VER%.*}"; else MINOR="$MAJOR.0"; fi
-            TAGS="$GITHUB_REF_NAME $MINOR $MAJOR latest"
-            REF_LABEL="Tag"
-          else
-            TAGS="latest sha-${GITHUB_SHA::7}"
-            REF_LABEL="分支"
-          fi
+          TAGS="${VERSION} ${MAJORMINOR} ${MAJOR} latest"
           TEXT=$(printf '%s\n' \
             "${ICON} wg-easy 镜像${STATUS}" \
             "仓库: ${IMAGE}" \
             "标签: ${TAGS}" \
-            "${REF_LABEL}: ${GITHUB_REF_NAME}" \
+            "版本: v${VERSION} @ ${GITHUB_REF_NAME}" \
             "提交: ${GITHUB_SHA::7} $(echo "$COMMIT_MSG" | head -n 1)" \
             "触发: ${ACTOR}" \
             "日志: ${RUN_URL}")
@@ -237,6 +279,9 @@ jobs:
         env:
           WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
           RESULT: ${{ needs.docker-merge.result }}
+          VERSION: ${{ needs.config.outputs.version }}
+          MAJORMINOR: ${{ needs.config.outputs.majorMinor }}
+          MAJOR: ${{ needs.config.outputs.major }}
           REGISTRY: ${{ vars.DOCKER_REGISTRY }}
           NAMESPACE: ${{ vars.DOCKER_NAMESPACE }}
           IMAGE_NAME: ${{ vars.DOCKER_IMAGE }}
@@ -256,21 +301,12 @@ jobs:
             cancelled) ICON="⏹"; STATUS="已取消" ;;
             *)         ICON="❌"; STATUS="失败（job: ${RESULT}）" ;;
           esac
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            VER="${GITHUB_REF_NAME#v}"
-            MAJOR="${VER%%.*}"
-            if [[ "$VER" == *.* ]]; then MINOR="${VER%.*}"; else MINOR="$MAJOR.0"; fi
-            TAGS="$GITHUB_REF_NAME $MINOR $MAJOR latest"
-            REF_LABEL="Tag"
-          else
-            TAGS="latest sha-${GITHUB_SHA::7}"
-            REF_LABEL="分支"
-          fi
+          TAGS="${VERSION} ${MAJORMINOR} ${MAJOR} latest"
           TEXT=$(printf '%s\n' \
             "${ICON} wg-easy 镜像${STATUS}" \
             "仓库: ${IMAGE}" \
             "标签: ${TAGS}" \
-            "${REF_LABEL}: ${GITHUB_REF_NAME}" \
+            "版本: v${VERSION} @ ${GITHUB_REF_NAME}" \
             "提交: ${GITHUB_SHA::7} $(echo "$COMMIT_MSG" | head -n 1)" \
             "触发: ${ACTOR}" \
             "日志: ${RUN_URL}")

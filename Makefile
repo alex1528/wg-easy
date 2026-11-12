@@ -6,8 +6,8 @@ REGISTRY  ?= ccr.ccs.tencentyun.com
 NAMESPACE ?= vpn-server
 IMAGE     ?= wg-easy
 
-# 标签默认取 git 短哈希；也可指定：make deploy TAG=v1.0.0
-TAG       ?= $(shell git rev-parse --short HEAD)
+# 版本号取自 package.json 的 version（发布唯一版本来源）；也可强制指定：make deploy TAG=1.2.3
+TAG       ?= $(shell node -p "require('./package.json').version" 2>/dev/null || git rev-parse --short HEAD)
 PLATFORMS ?= linux/amd64,linux/arm64
 
 ifeq ($(strip $(REGISTRY)),)
