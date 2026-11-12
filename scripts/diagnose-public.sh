@@ -121,6 +121,13 @@ else
 fi
 old="$(docker exec "$C" printenv WG_ALLOW_IPS 2>/dev/null || true)"
 [ -z "$old" ] || bad "容器里还有旧变量 WG_ALLOW_IPS=$old，说明容器没有按新 compose 重建"
+GATE="$(docker exec "$C" printenv WG_ADMIN_GATE 2>/dev/null || true)"
+GATE="${GATE:-on}"
+if [ "$GATE" = off ]; then
+  info "管理员 IP 开关：off（所有 IP 都能访问登录页和后台，白名单只用于 CrowdSec 不封禁）"
+else
+  info "管理员 IP 开关：$GATE（非管理员 IP 只能访问 WG_PUBLIC_PATHS）"
+fi
 
 PP="$(docker exec "$C" printenv WG_PUBLIC_PATHS 2>/dev/null || true)"
 PP="${PP:-/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*}"

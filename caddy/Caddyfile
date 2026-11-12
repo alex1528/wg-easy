@@ -73,6 +73,29 @@
 	tls /etc/caddy/certs/{$CADDY_TLS_CERT_FILE:cert.pem} /etc/caddy/certs/{$CADDY_TLS_KEY_FILE:key.pem}
 }
 
+# ---------- 管理员 IP 开关（由 .env 的 WG_ADMIN_GATE 选择，见站点块 route 里的 import）----------
+# on：管理后台只允许管理员 IP，WG_PUBLIC_PATHS 里的路径对所有 IP 开放
+#   管理员 IP：caddy/admin-ips.caddy，由 scripts/admin-ips.sh 根据 CrowdSec 管理员白名单生成，两边是同一份名单
+#   公开接口默认：/api/livewireguard/*（同步配置）、/api/auth/oidc 和 /api/auth/oidc/*（OIDC 登录与回调）、/cnf/*（一次性链接）
+#   其余请求返回 403，带 X-Wg-Gate: admin-only 头，便于和 CrowdSec 封禁（403 无此头）、限流（429）区分
+(admin_gate_on) {
+	vars wg_admin_gate on
+	@blocked {
+		not {
+			import /etc/caddy/admin-ips.caddy
+		}
+		not path {$WG_PUBLIC_PATHS:/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*}
+	}
+	header @blocked X-Wg-Gate "admin-only"
+	respond @blocked "Forbidden: admin IP only" 403
+}
+
+# off：不按来源 IP 限制，所有 IP 都能打开登录页和后台
+#   仍受 CrowdSec 封禁、登录/2FA 限流、wg-easy 密码 + 2FA / OIDC 认证保护；白名单 IP 仍不会被 CrowdSec 封禁
+(admin_gate_off) {
+	vars wg_admin_gate off
+}
+
 # ---------- 安全响应头 ----------
 (security_headers) {
 	header {
@@ -123,24 +146,9 @@
 		# ---------- 0. CrowdSec：已被封禁的 IP 直接返回 403（对 /cnf/* 同样生效）----------
 		crowdsec
 
-		# ---------- 1. 管理后台只允许管理员 IP，同步配置等公开接口允许所有 IP ----------
-		# 管理员 IP：caddy/admin-ips.caddy，由 scripts/admin-ips.sh 根据 CrowdSec 管理员白名单生成，两边是同一份名单
-		# 公开接口：WG_PUBLIC_PATHS（空格分隔），不限请求方法。默认：
-		#   /api/livewireguard/*                 客户端同步配置等接口
-		#   /api/auth/oidc、/api/auth/oidc/*     客户端同步前的 OIDC 登录和回调（/callback）
-		#   /cnf/*                               一次性配置链接
-		#   公开接口仍受 CrowdSec 封禁、限流和 wg-easy 自身认证的约束
-		# 两个条件都不满足的请求返回 403，带 X-Wg-Gate: admin-only 头，
-		#   便于和 CrowdSec 封禁（403，无此头）、限流（429）、wg-easy 自身的错误区分
-		#   排查：bash scripts/diagnose-public.sh
-		@blocked {
-			not {
-				import /etc/caddy/admin-ips.caddy
-			}
-			not path {$WG_PUBLIC_PATHS:/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*}
-		}
-		header @blocked X-Wg-Gate "admin-only"
-		respond @blocked "Forbidden: admin IP only" 403
+		# ---------- 1. 管理员 IP 开关（WG_ADMIN_GATE=on|off，见上方 admin_gate_* snippet）----------
+		# 值写错会直接启动失败（找不到对应 snippet），不会悄悄关掉限制
+		import admin_gate_{$WG_ADMIN_GATE:on}
 
 		# ---------- 2. Prometheus 指标仅内网可访问 ----------
 		@metrics_public {

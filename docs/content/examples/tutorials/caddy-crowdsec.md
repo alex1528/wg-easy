@@ -29,7 +29,7 @@ flowchart LR
 Caddy 处理每个请求的顺序：
 
 1. CrowdSec 封禁检查，已封禁的 IP 返回 403
-2. 管理后台只允许管理员 IP（与 CrowdSec 管理员白名单是同一份名单）；同步配置接口、客户端的 OIDC 登录和 `/cnf/*` 一次性链接对所有 IP 开放
+2. 管理后台只允许管理员 IP（与 CrowdSec 管理员白名单是同一份名单）；同步配置接口、客户端的 OIDC 登录和 `/cnf/*` 一次性链接对所有 IP 开放；`WG_ADMIN_GATE=off` 时跳过这一步
 3. `/metrics/*` 只允许内网 IP
 4. 限流，超出返回 429
 5. 压缩后转发给 wg-easy
@@ -127,6 +127,7 @@ TENCENTCLOUD_SECRET_KEY=xxxxxxxxxxxxxxxx
 
 | 变量                          | 默认值                                                  | 说明                                                                         |
 | ----------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `WG_ADMIN_GATE`               | `on`                                                    | `on` 管理后台只允许管理员 IP；`off` 不按来源 IP 限制，所有 IP 都能打开登录页                                          |
 | `WG_PUBLIC_PATHS`             | 见说明                                                     | 所有 IP 都能访问的路径，默认 `/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*`，其余只允许管理员 IP |
 | `RL_PUBLIC_PER_MIN`           | `30`                                                    | 公开接口每个 IP 每分钟的请求上限                                    |
 | `CADDY_HSTS`                  | `max-age=0`                                             | 换成正式证书并稳定运行后改为 `max-age=31536000`                              |
@@ -256,7 +257,7 @@ docker logs wg-easy 2>&1 | grep hairpin                                   # 启�
 docker exec wg-easy iptables -t nat -L PREROUTING -v -n | grep 51821     # pkts 计数应随访问增长
 ```
 
-经过这条路径时，Caddy 看到的来源 IP 是 wg-easy 容器的 `10.42.42.42`，所有隧道内的用户共用一个限流额度；这个地址属于内网，CrowdSec 默认不会封禁。管理后台只允许管理员 IP，所以连着隧道时，管理员在浏览器里打开后台会被拦下（来源是 `10.42.42.42`），同步配置接口不受影响。需要在隧道内管理时，先断开隧道再访问。
+经过这条路径时，Caddy 看到的来源 IP 是 wg-easy 容器的 `10.42.42.42`，所有隧道内的用户共用一个限流额度；这个地址属于内网，CrowdSec 默认不会封禁。`WG_ADMIN_GATE=on` 时管理后台只允许管理员 IP，所以连着隧道时，管理员在浏览器里打开后台会被拦下（来源是 `10.42.42.42`），同步配置接口不受影响。需要在隧道内管理时，先断开隧道再访问。
 
 ## 第 4 步：验证
 
@@ -461,6 +462,8 @@ docker exec wg-easy-crowdsec cscli alerts delete --ip <IP>      # 解封并清�
 
 - **永不被 CrowdSec 封禁**
 - **可以进入管理后台**：Caddy 只放行这些 IP；`WG_PUBLIC_PATHS` 里的路径对所有 IP 开放（默认同步配置接口 `/api/livewireguard/*`、客户端同步前的 OIDC 登录 `/api/auth/oidc` 和回调 `/api/auth/oidc/*`、一次性链接 `/cnf/*`），其余请求返回 403（带 `X-Wg-Gate: admin-only` 头）
+
+开关 `WG_ADMIN_GATE`（默认 `on`）。需要让所有 IP 都能打开 wg-easy 登录页时设为 `off`：Caddy 不再按来源 IP 拦截任何路径，管理后台靠 wg-easy 自己的密码 + 2FA / OIDC 登录保护，外加登录限流和 CrowdSec 封禁；白名单仍然生效，里面的 IP 永远不会被 CrowdSec 封禁。修改后执行 `docker compose -f docker-compose-dirty.yml up -d --no-build --force-recreate caddy`。值只能是 `on` 或 `off`，写错时 Caddy 启动失败。
 
 Caddy 读不了 YAML，所以由 `scripts/admin-ips.sh` 把名单转成 `caddy/admin-ips.caddy`。修改流程：
 

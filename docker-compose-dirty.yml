@@ -109,7 +109,10 @@ services:
       - TENCENTCLOUD_SECRET_KEY=${TENCENTCLOUD_SECRET_KEY:-}
       - ALIYUN_ACCESS_KEY_ID=${ALIYUN_ACCESS_KEY_ID:-}
       - ALIYUN_ACCESS_KEY_SECRET=${ALIYUN_ACCESS_KEY_SECRET:-}
-      # 所有 IP 都能访问的公开接口（空格分隔），其余路径只允许管理员 IP（caddy/admin-ips.caddy）
+      # 管理员 IP 开关：on = 后台只允许管理员 IP（caddy/admin-ips.caddy），WG_PUBLIC_PATHS 除外；
+      #   off = 不按来源 IP 限制，所有 IP 都能打开登录页（仍有 CrowdSec、限流、wg-easy 认证）
+      - WG_ADMIN_GATE=${WG_ADMIN_GATE:-on}
+      # WG_ADMIN_GATE=on 时所有 IP 都能访问的公开接口（空格分隔）
       - WG_PUBLIC_PATHS=${WG_PUBLIC_PATHS:-/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*}
       - RL_PUBLIC_PER_MIN=${RL_PUBLIC_PER_MIN:-30}
       - CADDY_HSTS=${CADDY_HSTS:-max-age=0}
