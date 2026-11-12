@@ -259,6 +259,20 @@ docker exec wg-easy iptables -t nat -L PREROUTING -v -n | grep 51821     # pkts 
 
 经过这条路径时，Caddy 看到的来源 IP 是 wg-easy 容器的 `10.42.42.42`，所有隧道内的用户共用一个限流额度；这个地址属于内网，CrowdSec 默认不会封禁。`WG_ADMIN_GATE=on` 时管理后台只允许管理员 IP，所以连着隧道时，管理员在浏览器里打开后台会被拦下（来源是 `10.42.42.42`），同步配置接口不受影响。需要在隧道内管理时，先断开隧道再访问。
 
+### IPv4 优先（4G 客户端）
+
+客户端走 IPv4 还是 IPv6 由 DNS 决定：域名只有 A 记录时，iOS 只会用 IPv4；在纯 IPv6 的 4G 网络上，iOS 会通过运营商的 NAT64 访问 IPv4 地址，服务端不需要做任何事。所以让客户端优先 IPv4，就是保证 wg-easy 和 Authentik 的域名**只有 A 记录、没有 AAAA**，包括 CNAME 指向的 CDN，以及 DNS 服务商的“IPv6 自动解析”或按线路（移动 / 联通 / 电信）单独配置的记录。检查：
+
+```shell
+bash scripts/diagnose-public.sh --dns vrh.verycloud.cn <Authentik 域名>
+```
+
+脚本用本机和几个公共 DNS 分别查询 A / AAAA，标出 AAAA 记录和“不同 DNS 返回不同 A 记录”的情况，并给出在 4G 热点下的电脑上对比用的 `nslookup` 命令。
+
+服务端 wg-easy 访问 Authentik（发现、JWKS、userinfo）时默认设置 `NODE_OPTIONS=--dns-result-order=ipv4first`，Authentik 以后加了 AAAA 而服务器 IPv6 不通时，令牌校验不会先卡在 IPv6 上。可以用 `.env` 的 `WG_NODE_OPTIONS` 覆盖。
+
+想让 IPv6 客户端直接走 IPv6，需要给域名加 AAAA，并保证服务器 IPv6 端到端可达：Docker 开启 `ip6tables`（见“前置条件”），防火墙放行 IPv6 的 51821/tcp 和 51820/udp。
+
 ## 第 4 步：验证
 
 下面的 `<WG_WEB_HOST>` 换成 `.env` 中的值。`internal` 模式下 curl 需要加 `-k`。
@@ -485,6 +499,8 @@ bash scripts/diagnose-public.sh --watch               # 实时观察：启动时
 bash scripts/diagnose-public.sh --watch <客户端公网IP> # 只看这个 IP 的请求
 sudo bash scripts/diagnose-public.sh --capture        # 抓发往 51821 的新 TCP 连接，和 --watch 对照
 bash scripts/diagnose-public.sh --oidc                # 列出 OIDC 端点，生成在客户端网络上执行的测试命令
+bash scripts/diagnose-public.sh --setup '<设置链接>'   # 解码 App 实际使用的 issuer / endpoint 并生成测试命令（首页“复制链接”）
+bash scripts/diagnose-public.sh --dns <域名> <Authentik 域名>  # 查 A / AAAA 记录和不同 DNS 线路的解析结果
 ```
 
 脚本依次检查：容器里的 Caddyfile 和管理员名单是不是新版、路径是否在 `WG_PUBLIC_PATHS` 里、wg-easy 自己对这个路径返回什么、经过 Caddy 返回什么、访问日志和 CrowdSec 封禁，最后列出最近被管理员 IP 规则拦下的路径（客户端需要但没有开放的路径就在这里），并检查 OIDC 服务能否访问。客户端同步超时，而 `--watch` 里没有出现任何请求，说明请求根本没到这台服务器：检查客户端填的服务器地址、上游防火墙或安全组，以及客户端所在网络能否访问 OIDC 服务（第 8 步给出了测试命令）。经过 Caddy 的结果这样看：
@@ -611,6 +627,8 @@ bash scripts/sync-upstream.sh --continue  # 手工处理完冲突或检查问题
 | 非管理员 IP 的客户端同步配置失败，curl 测 `/api/livewireguard/config` 却正常 | 客户端同步还会访问别的路径（如 OIDC 登录 `/api/auth/oidc/callback`）。运行 `bash scripts/diagnose-public.sh` 看第 6 步列出的被拦路径，加进 `WG_PUBLIC_PATHS` |
 | 非管理员 IP 同步超时，访问日志里没有这个客户端的请求 | 请求没到 Caddy：客户端连的是另一台服务器、上游防火墙只放行部分来源，或者 OIDC 服务（Authentik）只对内网开放，客户端拿不到令牌。用 `diagnose-public.sh --watch` 和第 8 步定位 |
 | 设置 `WG_ADMIN_GATE=off` 后非白名单客户端仍同步超时，`--watch` 里没有记录 | 请求没进入 Caddy 的 HTTP 处理：用 `--capture` 看有没有 TCP 新连接（有 = TLS 握手失败；没有 = 没到服务器），用 `--oidc` 生成的命令在客户端网络上测 OIDC 各端点 |
+| `WG_ADMIN_GATE=off`、不连隧道时，白名单 IP 能同步，非白名单 IP 不能，`--watch` 里没有记录 | App 先直接访问 OIDC 服务（Authentik）登录 / 刷新令牌，再请求 wg-easy。OIDC 的 issuer 只在办公网 / 内网可达（或 Authentik 自己限制了来源 IP）时，外网 App 卡在这一步。用 `--setup` 解码 App 实际使用的 issuer，在非白名单网络上逐条测试；把 Authentik 对外开放（至少 discovery、authorize、token、userinfo、jwks），或换成外网可达的 issuer 地址 |
+| 4G 等外网客户端同步超时、访问日志里没有记录，办公网正常 | 多半是 DNS：域名或 Authentik 有 AAAA 但 IPv6 不通，或智能解析让 4G 线路解析到别的地址。用 `--dns` 检查，删掉 AAAA 或错误的线路记录；见“IPv4 优先（4G 客户端）” |
 
 ## 已知限制
 

@@ -93,8 +93,11 @@ post_merge() {
     if bash scripts/admin-ips.sh --check >/dev/null 2>&1; then ok "管理员 IP 名单与白名单一致"
     else echo "  ✘ caddy/admin-ips.caddy 与白名单不一致：bash scripts/admin-ips.sh"; fail=1; fi
   fi
+  # 用 git 自己报告的工作区换行符判断（w/crlf、w/mixed）。不要用 xargs grep $'\r'：
+  # Git Bash 下 CR 参数经 xargs 传给 grep 会丢失，变成空模式匹配所有文件，曾把全部部署文件误报为 CRLF
   # shellcheck disable=SC2086
-  crlf="$(git ls-files -z -- caddy crowdsec deploy docker-compose-dirty.yml $OUR_SCRIPTS | xargs -0 grep -Il $'\r' 2>/dev/null || true)"
+  crlf="$(git ls-files --eol -- caddy crowdsec deploy docker-compose-dirty.yml $OUR_SCRIPTS 2>/dev/null \
+    | awk -F '\t' '{ split($1, a, " +"); if (a[2] == "w/crlf" || a[2] == "w/mixed") print $2 }' || true)"
   if [ -n "$crlf" ]; then
     echo "  ✘ 部署文件出现 CRLF："; printf '%s\n' "$crlf" | sed 's/^/    /'; fail=1
   else

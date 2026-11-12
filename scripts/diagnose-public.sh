@@ -8,6 +8,8 @@
 #   bash scripts/diagnose-public.sh --watch [客户端公网IP]   # 实时显示请求：运行后在客户端点“立即同步配置”
 #   sudo bash scripts/diagnose-public.sh --capture [客户端公网IP]  # 抓 TCP 新连接：和 --watch 对照，区分“没到服务器”和“TLS 握手失败”
 #   bash scripts/diagnose-public.sh --oidc                   # 列出客户端登录要访问的 OIDC 端点，并生成在客户端网络上执行的测试命令
+#   bash scripts/diagnose-public.sh --setup '<livewireguard://setup?d=...>'  # 解码 App 实际使用的设置链接（首页“复制链接”）
+#   bash scripts/diagnose-public.sh --dns [域名 ...]         # 查 A / AAAA：有没有 IPv6 记录、不同 DNS（线路）是否返回不同地址
 #
 # 客户端同步超时、但 --watch 里什么都没出现：请求根本没到这台服务器的 Caddy，
 #   问题在客户端连的地址、DNS、上游防火墙/安全组，或者客户端卡在 OIDC 登录（第 8 步）
@@ -103,9 +105,130 @@ case "${1:-}" in
     echo "  现在去客户端点“立即同步配置”"
     exec tcpdump -lnni any "$F"
     ;;
+  --setup)
+    LINK="${2:-}"
+    [ -n "$LINK" ] || { echo "用法：$0 --setup '<livewireguard://setup?d=...>'（wg-easy 首页 Connect → LiveWireGuard 设置 → 复制链接；整段用单引号括起来）"; exit 2; }
+    D="${LINK#*d=}"; D="${D%%&*}"
+    D="$(printf '%s' "$D" | tr '_-' '/+')"
+    while [ $(( ${#D} % 4 )) -ne 0 ]; do D="$D="; done
+    J="$(printf '%s' "$D" | base64 -d 2>/dev/null || true)"
+    [ -n "$J" ] || { echo "✘ 解码失败：不是 livewireguard://setup?d=<base64url> 格式"; exit 1; }
+    jget() { printf '%s' "$J" | grep -oE "\"$1\" *: *\"[^\"]*\"" | head -n 1 | sed -E 's/.*: *"([^"]*)"/\1/'; }
+    ISS="$(jget issuer)"; EP="$(jget endpoint)"; CID="$(jget client_id)"; RURI="$(jget redirect_uri)"
+    echo "== App 实际使用的设置（来自二维码 / 设置链接）"
+    echo "  issuer     : ${ISS:-<空>}"
+    echo "  client_id  : ${CID:-<空>}"
+    echo "  redirect   : ${RURI:-<空>}"
+    echo "  endpoint   : ${EP:-<空>}"
+    echo
+    echo "== 这两个地址的主机名在本服务器上解析到"
+    warn=0
+    for u in "$ISS" "$EP"; do
+      [ -n "$u" ] || continue
+      h="${u#*://}"; h="${h%%/*}"; h="${h%%:*}"
+      a="$(getent ahosts "$h" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+      [ -n "$a" ] || a="$h"
+      echo "  · $h → ${a:-<解析失败>}"
+      for ip in $a; do
+        case "$ip" in
+          10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|127.*|fd*|fe80*|::1)
+            echo "    ✘ $ip 是内网地址：只有内网 / 办公网（白名单 IP 所在网络）能访问，4G 等外网的 App 访问不到"; warn=1 ;;
+        esac
+      done
+      case "$u" in http://*) echo "    ⚠ $u 是 http：App 要求 HTTPS"; warn=1 ;; esac
+    done
+    [ "$warn" = 1 ] || echo "  ✔ 本服务器看到的是公网地址（外网是否放行，还要在客户端网络上实测，见下）"
+    echo
+    echo "== 发现文档里 App 要访问的 OIDC 端点"
+    URLS=""
+    if [ -n "$ISS" ]; then
+      DISC="${ISS%/}/.well-known/openid-configuration"
+      URLS="$DISC"
+      DJSON="$(curl -sS -m 10 "$DISC" 2>/dev/null || docker exec wg-easy wget -q -T 8 -O - "$DISC" 2>/dev/null || true)"
+      if [ -z "$DJSON" ]; then
+        echo "  ✘ 从本服务器也取不到 $DISC"
+      else
+        for k in authorization_endpoint token_endpoint userinfo_endpoint jwks_uri; do
+          v="$(printf '%s' "$DJSON" | grep -oE "\"$k\" *: *\"[^\"]+\"" | head -n 1 | sed -E 's/.*: *"([^"]+)"/\1/')"
+          [ -z "$v" ] || { echo "  · $k: $v"; URLS="$URLS $v"; }
+        done
+      fi
+    fi
+    [ -z "$EP" ] || URLS="$URLS $EP"
+    echo
+    echo "== 在非白名单网络（手机 4G 热点下的电脑）逐条执行；或手机浏览器逐个打开"
+    echo "   任何 HTTP 状态码都说明网络通；000 / 超时说明 App 在这个网络上走不通这一步"
+    echo "-----------------------------------------------------------------"
+    for u in $URLS; do
+      printf "curl -sS -o /dev/null -m 10 -w '%%{http_code} %%{time_total}s  %s\\\\n' '%s'\n" "$u" "$u"
+    done
+    echo "-----------------------------------------------------------------"
+    echo "   App 同步顺序：issuer 发现 → 浏览器打开 authorization_endpoint 登录 → token_endpoint 换 / 刷新令牌 → 请求 endpoint。"
+    echo "   前面任一步不通，App 就会超时，而且请求根本不会到 wg-easy（--watch 里看不到）"
+    exit 0
+    ;;
+  --dns)
+    shift
+    HOSTS="$*"
+    if [ -z "$HOSTS" ]; then
+      H1="$(docker exec wg-easy-caddy printenv WG_WEB_HOST 2>/dev/null || true)"
+      O="$(docker exec wg-easy printenv OAUTH_OIDC_SERVER 2>/dev/null || true)"
+      H2="${O#*://}"; H2="${H2%%/*}"; H2="${H2%%:*}"
+      HOSTS="$H1 $H2"
+    fi
+    HOSTS="$(echo $HOSTS)"
+    [ -n "$HOSTS" ] || { echo "用法：$0 --dns <wg-easy 域名> <Authentik 域名>"; exit 2; }
+    command -v dig >/dev/null 2>&1 || { echo "需要 dig：apt install -y dnsutils（CentOS：yum install -y bind-utils）"; exit 1; }
+    RES="${DNS_RESOLVERS:-system 223.5.5.5 119.29.29.29 114.114.114.114 8.8.8.8}"
+    q() {
+      local s=""
+      [ "$3" = system ] || s="@$3"
+      dig +short +time=3 +tries=1 $s "$2" "$1" 2>/dev/null | grep -E "$4" | sort -u | tr '\n' ' '
+    }
+    any6=0
+    for h in $HOSTS; do
+      echo "== $h"
+      cn="$(dig +short +time=3 +tries=1 "$h" CNAME 2>/dev/null | tr '\n' ' ')"
+      [ -z "$cn" ] || echo "  · CNAME：$cn（AAAA 也可能来自 CNAME 指向的 CDN / 负载均衡）"
+      a_all=""; six=""
+      for r in $RES; do
+        a="$(q A "$h" "$r" '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')"
+        aaaa="$(q AAAA "$h" "$r" '^[0-9a-fA-F]*:[0-9a-fA-F:.]*$')"
+        printf '  · %-16s A: %-34s AAAA: %s\n' "$r" "${a:-<无>}" "${aaaa:-<无>}"
+        a_all="$a_all $a"; six="$six $aaaa"
+      done
+      nA="$(echo $a_all | tr ' ' '\n' | sed '/^$/d' | sort -u | grep -c . || true)"
+      if [ -n "$(echo $six)" ]; then
+        any6=1
+        echo "  ✘ 有 AAAA（IPv6）记录：iOS 在 4G 上会优先连这些 IPv6 地址，IPv6 不通时同步就会卡住"
+      else
+        echo "  ✔ 没有 AAAA：客户端只会走 IPv4（纯 IPv6 的 4G 网络由运营商 NAT64 转成 IPv4），不存在 IPv6 优先的问题"
+      fi
+      [ "${nA:-0}" -le 1 ] || echo "  ⚠ 不同 DNS 返回的 A 记录不一样：域名按线路 / 地区返回不同地址（智能解析），4G 用户可能被解析到别的 IP"
+    done
+    echo
+    echo "== 在 4G 热点下的电脑上执行（用运营商 DNS 解析，和上面对比）"
+    for h in $HOSTS; do
+      echo "nslookup -type=A $h"
+      echo "nslookup -type=AAAA $h"
+    done
+    echo "  A 记录应和上面一致，AAAA 应为空。不一致时去 DNS 服务商（如 DNSPod）检查“线路”类记录（移动 / 联通 / 电信 / 境外），"
+    echo "  以及 CDN 或 DNS 的“IPv6 自动解析”开关"
+    if [ "$any6" = 1 ]; then
+      echo
+      echo "== 让客户端改走 IPv4：删除上面的 AAAA 记录（或关闭 CDN / DNS 的 IPv6 解析），等 TTL 过期后再试"
+      echo "   确认是否 IPv6 不通：在 4G 热点下的电脑上分别执行 curl -4 / curl -6 访问同一地址，-6 超时即是"
+    fi
+    exit 0
+    ;;
   --oidc)
     OIDC="$(docker exec wg-easy printenv OAUTH_OIDC_SERVER 2>/dev/null || true)"
-    [ -n "$OIDC" ] || { echo "wg-easy 没有设置 OAUTH_OIDC_SERVER"; exit 1; }
+    if [ -z "$OIDC" ]; then
+      echo "wg-easy 没有设置 OAUTH_OIDC_SERVER 环境变量：OIDC 可能是在管理面板（管理 → OIDC）里配置的，环境变量看不到。"
+      echo "改用 App 实际使用的设置链接检查：bash $0 --setup '<livewireguard://setup?d=...>'"
+      exit 1
+    fi
+    echo "注意：管理面板（管理 → OIDC）里的设置优先于环境变量；以 App 实际使用的为准，用 --setup 检查更可靠"
     DISC="${OIDC%/}/.well-known/openid-configuration"
     echo "== OIDC 服务：$OIDC"
     DJSON="$(docker exec wg-easy wget -q -T 8 -O - "$DISC" 2>/dev/null || true)"
@@ -133,7 +256,7 @@ case "${1:-}" in
     echo "   最后才请求 wg-easy。OIDC 任一端点不可达，客户端就会超时，wg-easy / Caddy 日志里也不会有记录"
     exit 0
     ;;
-  -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
 esac
 
 P="${1:-/api/livewireguard/config}"

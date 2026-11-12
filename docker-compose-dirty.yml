@@ -23,6 +23,8 @@ services:
       - WG_HAIRPIN_DST6=${WG_HAIRPIN_DST6:-}
       - WG_HAIRPIN_CADDY_IPV4=10.42.42.43
       - WG_HAIRPIN_CADDY_IPV6=fdcc:ad94:bacf:61a3::2b
+      # wg-easy（Node）解析域名优先 IPv4：访问 Authentik（发现、JWKS、userinfo）时不会先卡在不通的 IPv6 上
+      - NODE_OPTIONS=${WG_NODE_OPTIONS:---dns-result-order=ipv4first}
     networks:
       wg:
         ipv4_address: 10.42.42.42
