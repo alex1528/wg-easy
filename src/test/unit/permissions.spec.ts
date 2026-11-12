@@ -24,13 +24,17 @@ describe('permissions', () => {
     expect(hasPermissions(admin, 'admin', 'any')).toBe(true);
   });
 
-  test('client can only rename / view / delete own clients', () => {
+  test('client can view / rename / toggle / delete own clients', () => {
     expect(hasPermissions(client, 'clients', 'view', ownClient)).toBe(true);
     expect(hasPermissions(client, 'clients', 'update', ownClient)).toBe(true);
+    expect(hasPermissions(client, 'clients', 'toggle', ownClient)).toBe(true);
     expect(hasPermissions(client, 'clients', 'delete', ownClient)).toBe(true);
 
     expect(hasPermissions(client, 'clients', 'view', otherClient)).toBe(false);
     expect(hasPermissions(client, 'clients', 'update', otherClient)).toBe(
+      false
+    );
+    expect(hasPermissions(client, 'clients', 'toggle', otherClient)).toBe(
       false
     );
     expect(hasPermissions(client, 'clients', 'delete', otherClient)).toBe(
@@ -38,11 +42,10 @@ describe('permissions', () => {
     );
   });
 
-  test('client has no advanced / toggle / create / user permissions', () => {
+  test('client has no advanced / create / user permissions', () => {
     expect(hasPermissions(client, 'clients', 'updateAdvanced', ownClient)).toBe(
       false
     );
-    expect(hasPermissions(client, 'clients', 'toggle', ownClient)).toBe(false);
     expect(hasPermissions(client, 'clients', 'create')).toBe(false);
     expect(hasPermissions(client, 'users', 'view')).toBe(false);
     expect(hasPermissions(client, 'users', 'update')).toBe(false);

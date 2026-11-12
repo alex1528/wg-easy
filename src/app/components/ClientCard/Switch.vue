@@ -1,25 +1,19 @@
 <template>
   <span
-    v-if="!canToggle"
-    class="flex items-center gap-1 px-1 text-xs"
-    :title="$t('client.setByAdmin')"
-  >
-    <span
-      class="inline-block size-2 rounded-full"
-      :class="client.enabled ? 'bg-green-500' : 'bg-gray-400'"
-    />
-    {{
-      client.enabled ? $t('client.enabled') : $t('admin.users.statusDisabled')
-    }}
-  </span>
-  <BaseSwitch
-    v-else
-    :model-value="enabled"
     :title="
-      client.enabled ? $t('client.disableClient') : $t('client.enableClient')
+      canToggle
+        ? client.enabled
+          ? $t('client.disableClient')
+          : $t('client.enableClient')
+        : $t('client.setByAdmin')
     "
-    @update:model-value="toggleClient"
-  />
+  >
+    <BaseSwitch
+      :model-value="enabled"
+      :disabled="!canToggle"
+      @update:model-value="toggleClient"
+    />
+  </span>
 </template>
 
 <script setup lang="ts">
@@ -27,7 +21,10 @@ const props = defineProps<{
   client: LocalClient;
 }>();
 
-const canToggle = usePermission('clients', 'toggle');
+const canToggle = usePermission('clients', 'toggle', () => ({
+  id: props.client.id,
+  userId: props.client.userId,
+}));
 
 const enabled = ref(props.client.enabled);
 

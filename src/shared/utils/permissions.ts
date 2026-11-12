@@ -136,7 +136,7 @@ export const ROLES = {
       create: false,
       update: (user, client) => user.id === client.userId,
       updateAdvanced: false,
-      toggle: false,
+      toggle: (user, client) => user.id === client.userId,
       delete: (user, client) => user.id === client.userId,
       custom: true,
     },
