@@ -4,8 +4,61 @@
 # 在服务器的 wg-easy 目录下运行：
 #   bash scripts/diagnose-public.sh                          # 默认检查 /api/livewireguard/config
 #   bash scripts/diagnose-public.sh /api/auth/oidc/callback  # 检查其他路径
+#   bash scripts/diagnose-public.sh --ip <客户端公网IP>      # 列出这个 IP 最近的全部请求（看客户端同步时访问了什么）
+#   bash scripts/diagnose-public.sh --watch [客户端公网IP]   # 实时显示请求：运行后在客户端点“立即同步配置”
+#
+# 客户端同步超时、但 --watch 里什么都没出现：请求根本没到这台服务器的 Caddy，
+#   问题在客户端连的地址、DNS、上游防火墙/安全组，或者客户端卡在 OIDC 登录（第 8 步）
 set -uo pipefail
 cd "$(dirname "$0")/.."
+
+LOG=caddy/logs/access.log
+
+# 把 Caddy 的 JSON 访问日志转成一行：时间 来源IP 方法 主机 路径 状态 耗时
+fmt() {
+  sed -u -E 's/.*"ts":([0-9]+)[0-9.]*,.*"client_ip":"([^"]*)".*"method":"([A-Z]+)".*"host":"([^"]*)".*"uri":"([^"?]*)[^"]*".*"duration":([0-9.e-]+).*"status":([0-9]+).*/\1 \2 \3 \4 \5 \7 \6/' \
+  | while read -r ts ip m h u s d; do
+      case "$ts" in *[!0-9]*|"") continue ;; esac
+      printf '  · %s  %-15s %-6s %-4s %-40s %ss  %s\n' \
+        "$(date -d "@$ts" +%m-%d\ %H:%M:%S 2>/dev/null || echo "$ts")" "$ip" "$m" "$s" "$u" "$(printf '%.2f' "$d" 2>/dev/null || echo "$d")" "$h"
+    done
+}
+legend() {
+  echo "  列：时间 来源IP 方法 状态 路径 耗时 主机"
+  echo "  状态 0 = 请求处理完之前连接已断开（客户端先超时放弃了，看耗时）；403 = 被拦；429 = 限流；502/504 = 后端问题"
+}
+
+case "${1:-}" in
+  --ip)
+    IP="${2:-}"; [ -n "$IP" ] || { echo "用法：$0 --ip <客户端公网IP>"; exit 2; }
+    [ -f "$LOG" ] || { echo "没有 $LOG"; exit 1; }
+    echo "== $IP 最近 40 次请求（$LOG）"
+    legend
+    out="$(tail -n 50000 "$LOG" | grep -F "\"client_ip\":\"$IP\"" | tail -n 40 | fmt)"
+    if [ -n "$out" ]; then
+      echo "$out"
+    else
+      echo "  ✘ 日志里没有来自 $IP 的请求：这个 IP 的流量没到这台服务器的 Caddy"
+      echo "    · 客户端里填的服务器地址是不是这台（$(docker exec wg-easy-caddy printenv WG_WEB_HOST 2>/dev/null)）"
+      echo "    · 从该网络执行：curl -sS -o /dev/null -w '%{http_code}\\n' https://<域名>:51821/api/livewireguard/config"
+      echo "      超时 = 上游防火墙/安全组/端口转发只放行了部分来源；能返回 400 = 网络通，客户端卡在别处（如 OIDC 登录）"
+    fi
+    exit 0
+    ;;
+  --watch)
+    IP="${2:-}"
+    [ -f "$LOG" ] || { echo "没有 $LOG"; exit 1; }
+    echo "实时显示${IP:+ $IP 的}请求，现在去客户端点“立即同步配置”，Ctrl+C 结束"
+    legend
+    if [ -n "$IP" ]; then
+      tail -n 0 -F "$LOG" | grep --line-buffered -F "\"client_ip\":\"$IP\"" | fmt
+    else
+      tail -n 0 -F "$LOG" | fmt
+    fi
+    exit 0
+    ;;
+  -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+esac
 
 P="${1:-/api/livewireguard/config}"
 C=wg-easy-caddy
@@ -132,4 +185,23 @@ if [ -f caddy/logs/access.log ]; then
   else
     info "没有"
   fi
+fi
+
+echo
+echo "== 8. 客户端同步前要先登录的 OIDC 服务（Authentik）"
+OIDC="$(docker exec "$W" printenv OAUTH_OIDC_SERVER 2>/dev/null || true)"
+if [ -z "$OIDC" ]; then
+  info "wg-easy 没有设置 OAUTH_OIDC_SERVER"
+else
+  DISC="${OIDC%/}/.well-known/openid-configuration"
+  info "OIDC 服务：$OIDC"
+  r="$(docker exec "$W" wget -q -T 8 -O /dev/null -S "$DISC" 2>&1 | grep -m1 -E 'HTTP/|timed out|bad address|refused' || true)"
+  case "$r" in
+    *" 200"*) ok "从服务器访问发现地址正常：$(echo "$r" | sed -E 's/^ *//')" ;;
+    "")      bad "从服务器访问发现地址没有响应：$DISC" ;;
+    *)       bad "从服务器访问发现地址异常：$(echo "$r" | sed -E 's/^ *//')" ;;
+  esac
+  info "客户端也要能访问它。在非管理员网络（如手机 4G）上执行："
+  info "  curl -sS -o /dev/null -w '%{http_code} %{time_total}s\\n' $DISC"
+  info "超时说明 OIDC 服务只对办公网/内网开放：客户端拿不到令牌，同步就会超时，请求也不会出现在本机 Caddy 日志里"
 fi
