@@ -273,6 +273,23 @@ bash scripts/diagnose-public.sh --dns vrh.verycloud.cn <Authentik 域名>
 
 想让 IPv6 客户端直接走 IPv6，需要给域名加 AAAA，并保证服务器 IPv6 端到端可达：Docker 开启 `ip6tables`（见“前置条件”），防火墙放行 IPv6 的 51821/tcp 和 51820/udp。
 
+### 双线服务器
+
+域名按线路解析到两个公网 IP 时（智能解析，例如电信 / 联通走一条、移动走另一条），**两条线路都要能完整访问这套服务**，否则只有一部分用户能同步配置。需要满足三点：
+
+1. **端口转发**：每条线路的出口设备都转发 `51821/tcp` 和 `51820/udp` 到本机，不限制来源 IP。只转发了 `51820/udp` 时，隧道能连上，但同步配置会超时，访问日志里也看不到请求。
+2. **回程走原线路**：本机有两张网卡、两个网关时，从第二条线路进来的连接，回程默认会从第一条线路出去，运营商会丢掉这些包。Docker 容器的回应按目的地址选路，单纯 `ip rule from <IP>` 管不到，需要按连接打标记（CONNMARK）再查对应线路的路由表。两条线路都由同一台前置设备转发、本机只有一个网关时，这一点由前置设备处理，本机不用改。
+3. **hairpin 覆盖所有线路**：`.env` 中 `WG_HAIRPIN_DST4` 填上所有线路 IP，空格分隔，然后重建 wg-easy。
+
+检查：
+
+```shell
+sudo bash scripts/diagnose-public.sh --lines          # 自动取 WG_WEB_HOST 在各 DNS 的解析结果
+sudo bash scripts/diagnose-public.sh --capture <4G 手机公网IP>
+```
+
+`--lines` 判断每个线路 IP 是本机网卡地址还是前置设备转发，检查以它为源地址的回程从哪张网卡出去，需要时打印策略路由和 CONNMARK 命令（只打印、不执行），并给出在 4G 热点下逐条线路测试的 `curl --resolve` 命令。`--capture` 同时抓 SYN 和 SYN-ACK：两者不在同一张网卡，就是回程走错线路。
+
 ## 第 4 步：验证
 
 下面的 `<WG_WEB_HOST>` 换成 `.env` 中的值。`internal` 模式下 curl 需要加 `-k`。
@@ -501,6 +518,7 @@ sudo bash scripts/diagnose-public.sh --capture        # 抓发往 51821 的新 T
 bash scripts/diagnose-public.sh --oidc                # 列出 OIDC 端点，生成在客户端网络上执行的测试命令
 bash scripts/diagnose-public.sh --setup '<设置链接>'   # 解码 App 实际使用的 issuer / endpoint 并生成测试命令（首页“复制链接”）
 bash scripts/diagnose-public.sh --dns <域名> <Authentik 域名>  # 查 A / AAAA 记录和不同 DNS 线路的解析结果
+sudo bash scripts/diagnose-public.sh --lines           # 双线服务器：检查每条线路的入口和回程，打印修正命令
 ```
 
 脚本依次检查：容器里的 Caddyfile 和管理员名单是不是新版、路径是否在 `WG_PUBLIC_PATHS` 里、wg-easy 自己对这个路径返回什么、经过 Caddy 返回什么、访问日志和 CrowdSec 封禁，最后列出最近被管理员 IP 规则拦下的路径（客户端需要但没有开放的路径就在这里），并检查 OIDC 服务能否访问。客户端同步超时，而 `--watch` 里没有出现任何请求，说明请求根本没到这台服务器：检查客户端填的服务器地址、上游防火墙或安全组，以及客户端所在网络能否访问 OIDC 服务（第 8 步给出了测试命令）。经过 Caddy 的结果这样看：
@@ -629,6 +647,7 @@ bash scripts/sync-upstream.sh --continue  # 手工处理完冲突或检查问题
 | 设置 `WG_ADMIN_GATE=off` 后非白名单客户端仍同步超时，`--watch` 里没有记录 | 请求没进入 Caddy 的 HTTP 处理：用 `--capture` 看有没有 TCP 新连接（有 = TLS 握手失败；没有 = 没到服务器），用 `--oidc` 生成的命令在客户端网络上测 OIDC 各端点 |
 | `WG_ADMIN_GATE=off`、不连隧道时，白名单 IP 能同步，非白名单 IP 不能，`--watch` 里没有记录 | App 先直接访问 OIDC 服务（Authentik）登录 / 刷新令牌，再请求 wg-easy。OIDC 的 issuer 只在办公网 / 内网可达（或 Authentik 自己限制了来源 IP）时，外网 App 卡在这一步。用 `--setup` 解码 App 实际使用的 issuer，在非白名单网络上逐条测试；把 Authentik 对外开放（至少 discovery、authorize、token、userinfo、jwks），或换成外网可达的 issuer 地址 |
 | 4G 等外网客户端同步超时、访问日志里没有记录，办公网正常 | 多半是 DNS：域名或 Authentik 有 AAAA 但 IPv6 不通，或智能解析让 4G 线路解析到别的地址。用 `--dns` 检查，删掉 AAAA 或错误的线路记录；见“IPv4 优先（4G 客户端）” |
+| 双线服务器：部分运营商（如 4G）用户同步超时，`--dns` 显示域名解析到两个 IP | 第二条线路没有转发 `51821/tcp`，或回程走错线路。见“双线服务器”，用 `--lines` 和 `--capture` 定位 |
 
 ## 已知限制
 

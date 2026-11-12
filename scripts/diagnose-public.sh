@@ -10,6 +10,7 @@
 #   bash scripts/diagnose-public.sh --oidc                   # 列出客户端登录要访问的 OIDC 端点，并生成在客户端网络上执行的测试命令
 #   bash scripts/diagnose-public.sh --setup '<livewireguard://setup?d=...>'  # 解码 App 实际使用的设置链接（首页“复制链接”）
 #   bash scripts/diagnose-public.sh --dns [域名 ...]         # 查 A / AAAA：有没有 IPv6 记录、不同 DNS（线路）是否返回不同地址
+#   sudo bash scripts/diagnose-public.sh --lines [线路IP ...] # 双线服务器：检查每条线路的入口、回程路由，给出修正命令
 #
 # 客户端同步超时、但 --watch 里什么都没出现：请求根本没到这台服务器的 Caddy，
 #   问题在客户端连的地址、DNS、上游防火墙/安全组，或者客户端卡在 OIDC 登录（第 8 步）
@@ -95,13 +96,19 @@ case "${1:-}" in
     IP="${2:-}"
     command -v tcpdump >/dev/null 2>&1 || { echo "需要 tcpdump：apt install -y tcpdump（CentOS：yum install -y tcpdump）"; exit 1; }
     [ "$(id -u)" = 0 ] || { echo "需要 root：sudo bash $0 --capture ${IP}"; exit 1; }
-    # 只抓“发往 51821 的 SYN”（每次新连接一行）；去掉 Docker 转发到容器后的第二份（目的 10.42.42.0/24）和本机自测
-    F='tcp dst port 51821 and (tcp[tcpflags] & (tcp-syn|tcp-ack)) == tcp-syn and not dst net 10.42.42.0/24 and not src net 10.42.42.0/24 and not src host 127.0.0.1'
-    [ -z "$IP" ] || F="$F and src host $IP"
-    echo "抓取发往 51821 的新 TCP 连接${IP:+（只看 $IP）}，Ctrl+C 结束"
+    # 抓 51821 的 SYN（客户端发起）和 SYN-ACK（服务器回应），每次新连接两行；
+    # 去掉 Docker 网桥上的那一份（10.42.42.0/24）和本机自测
+    F='tcp port 51821 and (tcp[tcpflags] & tcp-syn) != 0 and not net 10.42.42.0/24 and not host 127.0.0.1'
+    [ -z "$IP" ] || F="$F and host $IP"
+    echo "抓取 51821 的 TCP 建连${IP:+（只看 $IP）}，Ctrl+C 结束"
+    echo "  本机网卡："
+    ip -4 -o addr show 2>/dev/null | awk '$2 != "lo" && $2 !~ /^(docker|br-|veth)/ {print "    · " $2 "  " $4}'
     echo "  建议另开一个终端同时运行：bash scripts/diagnose-public.sh --watch"
-    echo "  · 这里有记录、--watch 没有  = TCP 到了，TLS 握手失败（证书/SNI/客户端 TLS 设置），看 docker logs wg-easy-caddy"
-    echo "  · 这里也没有记录            = 请求没到这台服务器（客户端连的地址、上游防火墙/安全组/端口转发，或卡在 OIDC 登录：--oidc）"
+    echo "  · 只有 SYN [S]，没有 SYN-ACK [S.]          = 包到了网卡，被本机防火墙丢弃或没有转给 Caddy"
+    echo "  · [S] 从网卡 A 进、[S.] 从网卡 B 出         = 双线回程走错线路（运营商会丢掉），见 --lines"
+    echo "  · [S] 和 [S.] 都有，--watch 没有           = TCP 通了，TLS 握手失败，看 docker logs wg-easy-caddy"
+    echo "  · 什么都没有                               = 请求没到这台服务器（上游端口转发 / 防火墙 / 客户端地址）"
+    echo "  （tcpdump 4.99 及以上会在每行开头显示网卡名和 In / Out）"
     echo "  现在去客户端点“立即同步配置”"
     exec tcpdump -lnni any "$F"
     ;;
@@ -232,6 +239,94 @@ case "${1:-}" in
     fi
     exit 0
     ;;
+  --lines)
+    shift
+    command -v ip >/dev/null 2>&1 || { echo "需要 iproute2（ip 命令）"; exit 1; }
+    LIPS="$*"
+    H="$(docker exec wg-easy-caddy printenv WG_WEB_HOST 2>/dev/null || true)"
+    if [ -z "$LIPS" ] && [ -n "$H" ] && command -v dig >/dev/null 2>&1; then
+      LIPS="$(for r in "" @223.5.5.5 @119.29.29.29 @114.114.114.114 @8.8.8.8; do
+        dig +short +time=3 +tries=1 $r "$H" A 2>/dev/null; done | grep -E '^[0-9]+(\.[0-9]+){3}$' | sort -u | tr '\n' ' ')"
+    fi
+    LIPS="$(echo $LIPS)"
+    [ -n "$LIPS" ] || { echo "用法：sudo $0 --lines <线路1公网IP> <线路2公网IP>"; exit 2; }
+    echo "== 线路公网 IP：$LIPS${H:+（$H 在各 DNS 的解析结果）}"
+    echo
+    echo "== 本机网卡 IPv4"
+    ip -4 -o addr show | awk '$2 != "lo" {print "  · " $2 "  " $4}'
+    echo "== 默认路由"
+    ip -4 route show default | sed 's/^/  · /'
+    ndef="$(ip -4 route show default | grep -c . || true)"
+    echo "== 策略路由（ip rule）"
+    ip -4 rule show | sed 's/^/  · /'
+    echo
+    nlocal=0
+    for ip in $LIPS; do
+      dev="$(ip -4 -o addr show | awk -v ip="$ip" '{split($4, a, "/"); if (a[1] == ip) print $2}' | head -n 1)"
+      echo "== 线路 $ip"
+      if [ -z "$dev" ]; then
+        echo "  · 不是本机网卡上的地址：由前置路由器 / 防火墙做端口转发进来"
+        echo "    请在这条线路的出口设备上确认，并且不要限制来源 IP："
+        echo "      51821/tcp → 本机 51821（Web UI、同步配置）"
+        echo "      51820/udp → 本机 51820（WireGuard 隧道）"
+        echo "      80/tcp    → 本机 80（仅 CADDY_TLS_MODE=http 需要）"
+        continue
+      fi
+      nlocal=$((nlocal + 1))
+      echo "  · 本机网卡 $dev 上的地址"
+      via="$(ip -4 route get 1.1.1.1 from "$ip" 2>/dev/null | head -n 1)"
+      odev="$(printf '%s' "$via" | sed -nE 's/.* dev ([^ ]+).*/\1/p')"
+      echo "  · 以 $ip 为源地址的回程：${via:-<无路由>}"
+      if [ -n "$odev" ] && [ "$odev" != "$dev" ]; then
+        echo "  ✘ 回程从 $odev 出去，不是进来的 $dev：运营商会丢掉源地址不属于它的包，这条线路的连接都会超时"
+        LINE_BAD="${LINE_BAD:-} $ip:$dev"
+      else
+        echo "  ✔ 本机发出的回程走 $dev（但经 Docker 转发的连接按目的地址选路，仍可能走默认线路，见下）"
+        LINE_DOCKER="${LINE_DOCKER:-} $ip:$dev"
+      fi
+    done
+    if [ "$nlocal" -eq 0 ] && [ "${ndef:-0}" -le 1 ]; then
+      echo
+      echo "== 结论：两条线路都由前置设备转发，本机只有一个默认网关，回程由前置设备的连接跟踪送回原线路，本机不用改"
+      echo "   4G 走第二条线路仍不通时，就是那条线路的端口转发没配 51821/tcp，或者限制了来源 IP"
+    elif [ -n "${LINE_BAD:-}${LINE_DOCKER:-}" ]; then
+      echo
+      echo "== 双线回程修正（按线路打标记，回程查对应线路的路由表）。以下命令只打印，不会执行；先在测试窗口里试，确认后写进开机脚本"
+      tid=200
+      for x in ${LINE_BAD:-} ${LINE_DOCKER:-}; do
+        lip="${x%%:*}"; ldev="${x#*:}"
+        gw="$(ip -4 route show default dev "$ldev" 2>/dev/null | sed -nE 's/.*via ([0-9.]+).*/\1/p' | head -n 1)"
+        net="$(ip -4 route show dev "$ldev" scope link 2>/dev/null | awk 'NR==1 {print $1}')"
+        mark=$(printf '0x%x' "$tid")
+        echo "  # 线路 $lip（$ldev）"
+        [ -n "$gw" ] || echo "  # ⚠ 没找到 $ldev 的网关，把下面的 <网关> 换成这条线路的网关地址"
+        echo "  ip route replace default via ${gw:-<网关>} dev $ldev table $tid"
+        [ -z "$net" ] || echo "  ip route replace $net dev $ldev table $tid"
+        echo "  ip route replace 10.42.42.0/24 dev \$(ip -4 route show 10.42.42.0/24 | awk '{print \$3}') table $tid   # Docker 网桥"
+        echo "  ip rule add from $lip lookup $tid priority $tid"
+        echo "  ip rule add fwmark $mark lookup $tid priority $((tid + 1))"
+        echo "  iptables -t mangle -A PREROUTING -i $ldev -m conntrack --ctstate NEW -j CONNMARK --set-mark $mark"
+        echo "  iptables -t mangle -A PREROUTING ! -i $ldev -m connmark --mark $mark -j CONNMARK --restore-mark"
+        echo "  iptables -t mangle -A OUTPUT -m connmark --mark $mark -j CONNMARK --restore-mark"
+        tid=$((tid + 10))
+      done
+      echo "  sysctl -w net.ipv4.conf.all.rp_filter=2"
+      echo
+      echo "  作用：从某条线路进来的新连接打上标记，回程包（包括 Docker 容器的回应）按标记查这条线路的路由表，从原线路出去"
+      echo "  验证：sudo bash $0 --capture <4G 手机公网IP>，[S] 和 [S.] 应在同一张网卡"
+    fi
+    echo
+    echo "== 在 4G 热点下的电脑上逐条执行（直接指定线路 IP，绕开智能解析）"
+    for ip in $LIPS; do
+      echo "curl -sS -o /dev/null -m 10 -w '%{http_code} %{time_total}s  $ip\\n' --resolve ${H:-vrh.verycloud.cn}:51821:$ip https://${H:-vrh.verycloud.cn}:51821/api/livewireguard/config"
+    done
+    echo "  每条都应返回 400（Missing headers）；某条超时或 000 = 这条线路的 51821 不通"
+    echo
+    echo "== hairpin（隧道内访问 Web UI）也要覆盖所有线路：.env 中设置"
+    echo "   WG_HAIRPIN_DST4=$LIPS"
+    echo "   然后 docker compose -f docker-compose-dirty.yml up -d --no-build --force-recreate wg-easy"
+    exit 0
+    ;;
   --oidc)
     OIDC="$(docker exec wg-easy printenv OAUTH_OIDC_SERVER 2>/dev/null || true)"
     if [ -z "$OIDC" ]; then
@@ -267,7 +362,7 @@ case "${1:-}" in
     echo "   最后才请求 wg-easy。OIDC 任一端点不可达，客户端就会超时，wg-easy / Caddy 日志里也不会有记录"
     exit 0
     ;;
-  -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
 esac
 
 P="${1:-/api/livewireguard/config}"
