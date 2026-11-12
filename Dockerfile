@@ -84,6 +84,8 @@ ENV HOST=0.0.0.0
 ENV INSECURE=false
 ENV INIT_ENABLED=false
 ENV DISABLE_IPV6=false
+# 本 fork 独立版本管理（见 src/package.json），不与上游 wg-easy 版本比较，避免误报更新
+ENV DISABLE_VERSION_CHECK=true
 
 LABEL org.opencontainers.image.source=https://github.com/wg-easy/wg-easy
 
