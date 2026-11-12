@@ -198,13 +198,24 @@ case "${1:-}" in
         a_all="$a_all $a"; six="$six $aaaa"
       done
       nA="$(echo $a_all | tr ' ' '\n' | sed '/^$/d' | sort -u | grep -c . || true)"
+      if [ "${nA:-0}" -eq 0 ] && [ -z "$(echo $six)" ]; then
+        echo "  ✘ 所有 DNS 都解析不到任何地址：域名拼写错误，或还没有添加解析记录"
+        continue
+      fi
       if [ -n "$(echo $six)" ]; then
         any6=1
         echo "  ✘ 有 AAAA（IPv6）记录：iOS 在 4G 上会优先连这些 IPv6 地址，IPv6 不通时同步就会卡住"
       else
         echo "  ✔ 没有 AAAA：客户端只会走 IPv4（纯 IPv6 的 4G 网络由运营商 NAT64 转成 IPv4），不存在 IPv6 优先的问题"
       fi
-      [ "${nA:-0}" -le 1 ] || echo "  ⚠ 不同 DNS 返回的 A 记录不一样：域名按线路 / 地区返回不同地址（智能解析），4G 用户可能被解析到别的 IP"
+      if [ "${nA:-0}" -gt 1 ]; then
+        echo "  ⚠ 不同 DNS 返回的 A 记录不一样：域名按线路 / 地区返回不同地址（智能解析），4G 用户可能被解析到别的 IP"
+        for ip in $(echo $a_all | tr ' ' '\n' | sed '/^$/d' | sort -u); do
+          echo "    · $ip 的 51821（从本机访问，只说明这个地址上有没有服务在应答）："
+          r="$(curl -sk -o /dev/null -m 6 -w '%{http_code}' --resolve "$h:51821:$ip" "https://$h:51821/api/livewireguard/config" 2>/dev/null || true)"
+          echo "      HTTP ${r:-000}（400 = wg-easy 在应答；000 = 不通或不是这套服务）"
+        done
+      fi
     done
     echo
     echo "== 在 4G 热点下的电脑上执行（用运营商 DNS 解析，和上面对比）"
