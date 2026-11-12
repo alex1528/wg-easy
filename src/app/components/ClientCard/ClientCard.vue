@@ -36,9 +36,11 @@
       >
         <ClientCardSwitch :client="client" />
         <ClientCardEdit :client="client" />
-        <ClientCardQRCode :client="client" />
-        <ClientCardConfig :client="client" />
-        <ClientCardOneTimeLinkBtn :client="client" />
+        <template v-if="client.deviceId === null">
+          <ClientCardQRCode :client="client" />
+          <ClientCardConfig :client="client" />
+          <ClientCardOneTimeLinkBtn :client="client" />
+        </template>
       </div>
     </div>
   </div>

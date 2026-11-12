@@ -1,8 +1,15 @@
-import { defineEventHandler, getValidatedQuery, sendRedirect } from 'h3';
+import {
+  defineEventHandler,
+  getQuery,
+  getValidatedQuery,
+  sendRedirect,
+} from 'h3';
+import type { H3Event } from 'h3';
 import * as client from 'openid-client';
 import { z } from 'zod';
 
 import { WG_ENV } from '#server/utils/config';
+import { oauthErrorRedirect } from '#server/utils/i18nError';
 import { buildOauthConfig } from '#server/utils/oauth';
 import { useWGSession } from '#server/utils/session';
 import { getTrustedRequestHost } from '#server/utils/trustedProxy';
@@ -12,7 +19,7 @@ const OauthQuerySchema = z.object({
   link: z.coerce.boolean().optional(),
 });
 
-export default defineEventHandler(async (event) => {
+async function startLogin(event: H3Event) {
   const params = await getValidatedQuery(
     event,
     validateZod(OauthQuerySchema, event)
@@ -54,4 +61,14 @@ export default defineEventHandler(async (event) => {
   const redirectTo = client.buildAuthorizationUrl(config, parameters);
 
   return sendRedirect(event, redirectTo.toString());
+}
+
+/** errors are shown on the login / account page (no JSON error page) */
+export default defineEventHandler(async (event) => {
+  try {
+    return await startLogin(event);
+  } catch (err) {
+    const link = getQuery(event).link;
+    return oauthErrorRedirect(event, err, link ? '/me' : '/login');
+  }
 });

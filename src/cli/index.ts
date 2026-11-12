@@ -9,8 +9,16 @@ import packageJson from '../package.json';
 import clientsList from '#cli/clients/list';
 import clientsQr from '#cli/clients/qr';
 import dbAdminReset from '#cli/admin/reset';
+import dbUserList from '#cli/users/list';
+import dbUserPromote from '#cli/users/promote';
 
-const subCommands = [dbAdminReset, clientsList, clientsQr] as const;
+const subCommands = [
+  dbAdminReset,
+  dbUserList,
+  dbUserPromote,
+  clientsList,
+  clientsQr,
+] as const;
 
 // from citty
 function resolveValue<T>(input: Resolvable<T>): T | Promise<T> {

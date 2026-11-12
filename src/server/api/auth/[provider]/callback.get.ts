@@ -1,12 +1,17 @@
 import { createError, defineEventHandler, sendRedirect } from 'h3';
+import type { H3Event } from 'h3';
 
 import Database from '#server/utils/Database';
 import { SERVER_DEBUG } from '#server/utils/config';
-import { buildOauthConfig, getUserInfo } from '#server/utils/oauth';
+import { oauthErrorRedirect } from '#server/utils/i18nError';
+import { buildOauthConfig, getUserInfoWithClaims } from '#server/utils/oauth';
+import { extractGroups, mergeClaims } from '#server/utils/oidcRole';
+import { getEffectiveOidcRoleMapping } from '#server/utils/oidcRuntime';
 import { useWGSession } from '#server/utils/session';
 import { assertUnreachable } from '#server/utils/types';
+import type { OidcRoleInput } from '#db/repositories/user/service';
 
-export default defineEventHandler(async (event) => {
+async function handleCallback(event: H3Event) {
   const { config, provider, providerConfig } = await buildOauthConfig(event);
 
   const session = await useWGSession(event);
@@ -21,7 +26,7 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const userInfo = await getUserInfo(
+  const { userInfo, idTokenClaims } = await getUserInfoWithClaims(
     event,
     config,
     {
@@ -32,12 +37,24 @@ export default defineEventHandler(async (event) => {
     providerConfig
   );
 
+  // OIDC: map groups to the admin role
+  let roleInput: OidcRoleInput | undefined;
+  if (provider === 'oidc') {
+    const roleMapping = await getEffectiveOidcRoleMapping();
+    const groups = extractGroups(
+      mergeClaims(idTokenClaims, userInfo),
+      roleMapping.groupsClaim
+    );
+    roleInput = { groups, adminGroups: roleMapping.adminGroups };
+  }
+
   const result = await Database.users.loginWithOAuth(
     provider,
     userInfo.sub,
     userInfo.preferred_username || userInfo.email,
     userInfo.email,
-    userInfo.name || 'User'
+    userInfo.name || 'User',
+    roleInput
   );
 
   if (!result.success) {
@@ -89,9 +106,20 @@ export default defineEventHandler(async (event) => {
     oauth_verifier: undefined,
   });
 
+  await Database.users.recordLogin(result.user.id);
+
   SERVER_DEBUG(
     `New OAuth Session: ${data.id} for ${result.user.id} (${result.user.username}) with ${provider}`
   );
 
   return sendRedirect(event, '/');
+}
+
+/** errors are shown on the login page (no JSON error page) */
+export default defineEventHandler(async (event) => {
+  try {
+    return await handleCallback(event);
+  } catch (err) {
+    return oauthErrorRedirect(event, err, '/login');
+  }
 });

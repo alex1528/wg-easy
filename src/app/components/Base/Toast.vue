@@ -19,7 +19,7 @@
     <ToastAction as-child alt-text="toast" class="[grid-area:_action]">
       <slot />
     </ToastAction>
-    <ToastClose aria-label="Close">
+    <ToastClose :aria-label="$t('general.close')">
       <span aria-hidden>×</span>
     </ToastClose>
   </ToastRoot>

@@ -7,7 +7,9 @@ services:
       - /app/.nuxt
     volumes:
       - /lib/modules:/lib/modules:ro
-      # - ./data/:/etc/wireguard
+      # keep the database (/etc/wireguard/wg-easy.db) across rebuilds and restarts.
+      # Reset with: docker compose -f docker-compose.dev.yml down -v
+      - wg-easy-dev-data:/etc/wireguard
     ports:
       - "51820:51820/udp"
       - "51821:51821/tcp"
@@ -19,7 +21,16 @@ services:
       - INIT_HOST=test
       - INIT_PORT=51820
       - INIT_USERNAME=testtest
-      - INIT_PASSWORD=Qweasdyxcv!2
+      - INIT_PASSWORD=${INIT_PASSWORD:-Qweasdyxcv!2}
+      # OIDC login for the panel, shared by the LiveWireGuard import endpoint.
+      # Register http://localhost:51821/api/auth/oidc/callback and
+      # http://localhost:51821/api/auth/oidc/link in your IdP first.
+      # Real values live in .env (gitignored, auto-loaded by compose); see .env.example.
+      - OAUTH_PROVIDERS=${OAUTH_PROVIDERS:-oidc}
+      - OAUTH_OIDC_SERVER=${OAUTH_OIDC_SERVER:-}
+      - OAUTH_OIDC_CLIENT_ID=${OAUTH_OIDC_CLIENT_ID:-}
+      - OAUTH_OIDC_CLIENT_SECRET=${OAUTH_OIDC_CLIENT_SECRET:-}
+      - OAUTH_AUTO_REGISTER=${OAUTH_AUTO_REGISTER:-true}
 
     develop:
       watch:
@@ -35,3 +46,6 @@ services:
             - package.json
             - pnpm-lock.yaml
             - pnpm-workspace.yaml
+
+volumes:
+  wg-easy-dev-data:

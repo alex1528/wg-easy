@@ -15,6 +15,9 @@ export function useSubmit<T>(
   opts: SubmitOpts<T>
 ) {
   const toast = useToast();
+  const authStore = useAuthStore();
+  const route = useRoute();
+  const { t } = useI18n();
 
   return async (data: Body) => {
     try {
@@ -30,10 +33,40 @@ export function useSubmit<T>(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await opts.revert(true, res as any);
     } catch (e) {
-      if (e instanceof FetchError) {
+      if (e instanceof FetchError && e.statusCode === 403) {
+        // role changed (e.g. demoted by another admin) or user disabled
+        await authStore.update();
+        const user = authStore.userData;
+        const lostAdmin =
+          route.path.startsWith('/admin') &&
+          (!user || !hasPermissions(user, 'admin', 'any'));
         toast.showToast({
           type: 'error',
-          message: e.data.message,
+          message: lostAdmin
+            ? t('toast.permissionChanged')
+            : (e.data?.message ?? t('toast.permissionChanged')),
+        });
+        if (!user) {
+          await navigateTo('/login');
+          return;
+        }
+        if (lostAdmin) {
+          await navigateTo('/');
+          return;
+        }
+      } else if (e instanceof FetchError) {
+        // unhandled server errors only say "Server Error"
+        const message =
+          typeof e.data?.message === 'string' &&
+          e.data.message !== '' &&
+          e.data.message !== 'Server Error'
+            ? e.data.message
+            : (e.statusCode ?? 500) >= 500
+              ? t('error.server')
+              : t('toast.unknown');
+        toast.showToast({
+          type: 'error',
+          message,
         });
       } else if (e instanceof Error) {
         toast.showToast({

@@ -10,7 +10,8 @@
     "paths": {
       "#cli/*": ["./*"],
       "#server/*": ["../server/*"],
-      "#db/*": ["../server/database/*"]
+      "#db/*": ["../server/database/*"],
+      "#shared/*": ["../shared/*"]
     }
   },
   "include": ["./**/*.ts"]

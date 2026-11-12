@@ -20,6 +20,8 @@ export default definePermissionEventHandler(
 
     const svg = await WireGuard.getClientQRCodeSVG({ clientId });
     setHeader(event, 'Content-Type', 'image/svg+xml');
+    // always reflect the current config
+    setHeader(event, 'Cache-Control', 'no-store');
     return svg;
   }
 );

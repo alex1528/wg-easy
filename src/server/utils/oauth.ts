@@ -80,7 +80,37 @@ export function isConfiguredOauthProvider(
   return true;
 }
 
-function getEnabledOauthProvider(provider: OAUTH_PROVIDER) {
+async function getEnabledOauthProvider(
+  provider: OAUTH_PROVIDER
+): Promise<ConfiguredOAuthConfig | undefined> {
+  if (provider === 'oidc') {
+    // OIDC can be overridden in the admin panel: resolve at runtime.
+    // dynamic import: config.ts <-> oauth.ts form an import cycle
+    const { getEffectiveOidcConfig, getEffectiveOidcRoleMapping } =
+      await import('#server/utils/oidcRuntime');
+    const [effective, roleMapping] = await Promise.all([
+      getEffectiveOidcConfig(),
+      getEffectiveOidcRoleMapping(),
+    ]);
+    if (
+      !effective.isConfigured ||
+      !effective.server ||
+      !effective.clientId ||
+      !effective.clientSecret
+    ) {
+      return;
+    }
+    return {
+      ...OidcConfig,
+      friendlyName: effective.friendlyName,
+      server: effective.server,
+      // some providers (Okta, ...) only send groups with an extra scope
+      scope: roleMapping.panelScopes.join(' '),
+      clientId: effective.clientId,
+      clientSecret: effective.clientSecret,
+    };
+  }
+
   if (!WG_ENV.OAUTH_PROVIDERS?.includes(provider)) {
     return;
   }
@@ -98,7 +128,7 @@ export async function buildOauthConfig(event: H3Event) {
     });
   }
 
-  const oauthProvider = getEnabledOauthProvider(provider);
+  const oauthProvider = await getEnabledOauthProvider(provider);
   if (!oauthProvider) {
     throw createError({
       statusCode: 403,
@@ -179,6 +209,25 @@ export async function getUserInfo(
   state: OauthState,
   providerConfig: OAuthConfig
 ) {
+  const { userInfo } = await getUserInfoWithClaims(
+    event,
+    config,
+    state,
+    providerConfig
+  );
+  return userInfo;
+}
+
+/**
+ * Like {@link getUserInfo}, also returns the id_token claims
+ * (groups are often only in the id_token)
+ */
+export async function getUserInfoWithClaims(
+  event: H3Event,
+  config: client.Configuration,
+  state: OauthState,
+  providerConfig: OAuthConfig
+) {
   const currentUrl = getTrustedRequestURL(event, WG_ENV.TRUSTED_PROXIES);
   currentUrl.protocol = WG_ENV.INSECURE ? 'http' : 'https';
 
@@ -219,7 +268,10 @@ export async function getUserInfo(
     });
   }
 
-  return userInfo;
+  const idTokenClaims: Record<string, unknown> | undefined =
+    providerConfig.isOIDC === false ? undefined : tokens.claims();
+
+  return { userInfo, idTokenClaims };
 }
 
 type RequireKeys<T extends object, K extends keyof T> = Required<Pick<T, K>>;

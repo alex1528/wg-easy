@@ -2,6 +2,7 @@ import { createError, defineEventHandler, getHeader } from 'h3';
 import type { EventHandlerRequest, EventHandlerResponse, H3Event } from 'h3';
 
 import Database from '#server/utils/Database';
+import { localizeError } from '#server/utils/i18nError';
 import { isPasswordValid } from '#server/utils/password';
 import { getCurrentUser } from '#server/utils/session';
 import type { UserType } from '#db/repositories/user/types';
@@ -41,30 +42,35 @@ export const definePermissionEventHandler = <
   handler: PermissionHandler<TReq, TRes, Resource>
 ) => {
   return defineEventHandler(async (event) => {
-    const user = await getCurrentUser(event);
+    try {
+      const user = await getCurrentUser(event);
 
-    const permissions = hasPermissionsWithData(user, resource, action);
+      const permissions = hasPermissionsWithData(user, resource, action);
 
-    // if no data is required, check permissions
-    if (permissions.isBoolean()) {
-      permissions.check();
-    }
+      // if no data is required, check permissions
+      if (permissions.isBoolean()) {
+        permissions.check();
+      }
 
-    const response = await handler({
-      event,
-      user,
-      checkPermissions: permissions.check,
-    });
-
-    // if data is required, make sure permissions were checked
-    if (!permissions.checked) {
-      throw createError({
-        statusCode: 500,
-        statusMessage: 'Permission was not checked',
+      const response = await handler({
+        event,
+        user,
+        checkPermissions: permissions.check,
       });
-    }
 
-    return response;
+      // if data is required, make sure permissions were checked
+      if (!permissions.checked) {
+        throw createError({
+          statusCode: 500,
+          statusMessage: 'Permission was not checked',
+        });
+      }
+
+      return response;
+    } catch (err) {
+      // translated message for the UI (statusMessage stays English)
+      throw await localizeError(event, err);
+    }
   });
 };
 
@@ -95,35 +101,46 @@ export const defineSetupEventHandler = <
   handler: SetupHandler<TReq, TRes>
 ) => {
   return defineEventHandler(async (event) => {
-    const setup = await Database.general.getSetupStep();
-
-    if (setup.done) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: 'Invalid state',
-      });
+    try {
+      return await runSetupHandler(event, step, handler);
+    } catch (err) {
+      throw await localizeError(event, err);
     }
-
-    const validSetupSteps =
-      ValidSetupSteps[setup.step as keyof typeof ValidSetupSteps];
-
-    if (!validSetupSteps) {
-      throw createError({
-        statusCode: 500,
-        statusMessage: 'Invalid setup step',
-      });
-    }
-
-    if (!validSetupSteps.includes(step as never)) {
-      throw createError({
-        statusCode: 400,
-        statusMessage: 'Invalid step',
-      });
-    }
-
-    return await handler({ event, setup });
   });
 };
+
+async function runSetupHandler<
+  TReq extends EventHandlerRequest,
+  TRes extends EventHandlerResponse,
+>(event: H3Event<TReq>, step: ValidSteps, handler: SetupHandler<TReq, TRes>) {
+  const setup = await Database.general.getSetupStep();
+
+  if (setup.done) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid state',
+    });
+  }
+
+  const validSetupSteps =
+    ValidSetupSteps[setup.step as keyof typeof ValidSetupSteps];
+
+  if (!validSetupSteps) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: 'Invalid setup step',
+    });
+  }
+
+  if (!validSetupSteps.includes(step as never)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid step',
+    });
+  }
+
+  return await handler({ event, setup });
+}
 
 type Metrics = 'prometheus' | 'json';
 

@@ -42,6 +42,24 @@ docker compose exec -it wg-easy cli db:admin:reset --password <new_password>
 
 This will reset the password for the admin user to the new password you provided. If you include special characters in the password, make sure to escape them properly.
 
+By default the oldest admin is reset. Use `--username <username>` to reset a specific admin. The command also removes 2FA and enables the user.
+
+### Show Users
+
+List all users with their role and role source.
+
+```shell
+cli db:user:list
+```
+
+### Promote User
+
+Make a user an enabled admin again, e.g. if every admin was locked out. The role is set manually and is not changed by OIDC groups afterwards.
+
+```shell
+cli db:user:promote --username <username>
+```
+
 ### Show Clients
 
 List all clients that are currently configured with details such as client ID, Name, Public Key, and enabled status.

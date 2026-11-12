@@ -7,6 +7,7 @@ import type { client } from './schema';
 import {
   AddressSchema,
   AllowedIpsSchema,
+  AwgRangeSchema,
   DnsSchema,
   EnabledSchema,
   FirewallIpsSchema,
@@ -34,7 +35,13 @@ export type CreateClientType = Omit<
 
 export type UpdateClientType = Omit<
   CreateClientType,
-  'privateKey' | 'publicKey' | 'preSharedKey' | 'userId' | 'interfaceId'
+  | 'privateKey'
+  | 'publicKey'
+  | 'preSharedKey'
+  | 'userId'
+  | 'interfaceId'
+  | 'deviceId'
+  | 'isDefault'
 >;
 
 const name = z
@@ -75,6 +82,20 @@ export const ClientCreateSchema = z.object({
 
 export type ClientCreateType = z.infer<typeof ClientCreateSchema>;
 
+/** admin panel: optional owner (default: the logged in admin) */
+export const ClientCreateWithOwnerSchema = ClientCreateSchema.extend({
+  userId: z
+    .number({ message: t('zod.user.id') })
+    .int({ message: t('zod.user.id') })
+    .positive({ message: t('zod.user.id') })
+    .optional(),
+});
+
+/** fields a non admin user can change on their own clients */
+export const ClientSelfUpdateSchema = z.object({
+  name: name,
+});
+
 const filter = z.string().pipe(safeStringRefine);
 
 const sort = z.enum(['asc', 'desc']);
@@ -109,6 +130,13 @@ export const ClientUpdateSchema = schemaForType<UpdateClientType>()(
     i3: ISchema,
     i4: ISchema,
     i5: ISchema,
+    contentPaddingAddition: AwgRangeSchema,
+    rekeyAfterTime: AwgRangeSchema,
+    rekeyTimeout: AwgRangeSchema,
+    rejectAfterTime: AwgRangeSchema,
+    keepaliveTimeout: AwgRangeSchema,
+    maxHandshakeAttempts: AwgRangeSchema,
+    disableCookies: z.boolean().nullable(),
     persistentKeepalive: PersistentKeepaliveSchema,
     serverEndpoint: AddressSchema.nullable(),
     dns: DnsSchema.nullable(),

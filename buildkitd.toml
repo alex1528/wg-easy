@@ -1,0 +1,6 @@
+# buildx builder (wg-easy-builder) 的拉取加速配置。
+# 国内网络直连 auth.docker.io 常被掐断，这里把 docker.io 的拉取转发到镜像站。
+# 若该站不可用，换成你网络可达的镜像源，例如：
+#   mirrors = ["docker.1ms.run", "docker.m.daocloud.io"]
+[registry."docker.io"]
+  mirrors = ["docker.m.daocloud.io"]

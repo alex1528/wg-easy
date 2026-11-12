@@ -2,7 +2,7 @@
   <SelectRoot v-model="langProxy" :default-value="locale">
     <SelectTrigger
       class="group inline-flex h-8 items-center justify-around gap-2 rounded bg-gray-200 px-3 text-sm leading-none dark:bg-neutral-700 dark:text-neutral-400"
-      aria-label="Select language"
+      :aria-label="$t('general.selectLanguage')"
     >
       <IconsLanguage class="size-3" />
       <SelectValue />

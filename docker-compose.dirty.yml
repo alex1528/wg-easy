@@ -1,0 +1,65 @@
+services:
+  wg-easy:
+    #environment:
+    #  Optional:
+    #  - PORT=51821
+    #  - HOST=0.0.0.0
+    #  - INSECURE=false
+
+    image: ${WG_EASY_IMAGE:-ghcr.io/wg-easy/wg-easy:15}
+    container_name: wg-easy
+    networks:
+      wg:
+        ipv4_address: 10.42.42.42
+        ipv6_address: fdcc:ad94:bacf:61a3::2a
+    volumes:
+      - ./data:/etc/wireguard
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - "61820:51820/udp"
+      - "61821:51821/tcp"
+    restart: unless-stopped
+    # Kernel 3.10 (CentOS 7) has no io_uring; Docker 26's default seccomp
+    # profile returns EPERM for io_uring_* and libsql treats that as
+    # SQLITE_IOERR_WRITE. Bypass seccomp for this container.
+    security_opt:
+      - seccomp:unconfined
+    # wireguard-go (userspace fallback on this old kernel) needs the TUN device.
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+      # - NET_RAW # ⚠️ Uncomment if using Podman
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv6.conf.default.forwarding=1
+    # Secrets are interpolated from .env (gitignored, auto-loaded by compose).
+    # See .env.example.
+    environment:
+      - INIT_ENABLED=true
+      - INIT_HOST=test
+      - INIT_PORT=51820
+      - INIT_USERNAME=testtest
+      - INIT_PASSWORD=${INIT_PASSWORD:-Qweasdyxcv!2}
+      # OIDC login for the panel, shared by the LiveWireGuard import endpoint.
+      # Register http://localhost:51821/api/auth/oidc/callback and
+      # http://localhost:51821/api/auth/oidc/link in your IdP first.
+      - OAUTH_PROVIDERS=${OAUTH_PROVIDERS:-oidc}
+      - OAUTH_OIDC_SERVER=${OAUTH_OIDC_SERVER:-}
+      - OAUTH_OIDC_CLIENT_ID=${OAUTH_OIDC_CLIENT_ID:-}
+      - OAUTH_OIDC_CLIENT_SECRET=${OAUTH_OIDC_CLIENT_SECRET:-}
+      - OAUTH_AUTO_REGISTER=${OAUTH_AUTO_REGISTER:-true}
+
+networks:
+  wg:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.42.42.0/24
+        - subnet: fdcc:ad94:bacf:61a3::/64

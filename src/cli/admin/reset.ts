@@ -1,19 +1,25 @@
 import { defineCommand } from 'citty';
 import { consola } from 'consola';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 
 import { db, schema } from '#cli/db';
 import { hashPassword } from '#server/utils/password';
+import { roles } from '#shared/utils/permissions';
 
 export default defineCommand({
   meta: {
     name: 'db:admin:reset',
-    description: 'Reset the admin user password and TOTP settings',
+    description: 'Reset the password and TOTP settings of an admin user',
   },
   args: {
     password: {
       type: 'string',
       description: 'New password for the admin user',
+      required: false,
+    },
+    username: {
+      type: 'string',
+      description: 'Admin user to reset (default: the oldest admin)',
       required: false,
     },
   },
@@ -36,14 +42,33 @@ export default defineCommand({
     const hash = await hashPassword(password);
 
     const user = await db.transaction(async (tx) => {
-      const user = await tx
-        .select()
-        .from(schema.user)
-        .where(eq(schema.user.id, 1))
-        .get();
+      const user = ctx.args.username
+        ? await tx
+            .select()
+            .from(schema.user)
+            .where(eq(schema.user.username, ctx.args.username))
+            .get()
+        : await tx
+            .select()
+            .from(schema.user)
+            .where(eq(schema.user.role, roles.ADMIN))
+            .orderBy(asc(schema.user.id))
+            .limit(1)
+            .get();
 
       if (!user) {
-        consola.error('Admin user not found');
+        consola.error(
+          ctx.args.username
+            ? `User ${ctx.args.username} not found`
+            : 'Admin user not found. Use db:user:promote first.'
+        );
+        return;
+      }
+
+      if (user.role !== roles.ADMIN) {
+        consola.error(
+          `User ${user.username} is not an admin. Use db:user:promote first.`
+        );
         return;
       }
 
@@ -53,8 +78,9 @@ export default defineCommand({
           password: hash,
           totpVerified: false,
           totpKey: null,
+          enabled: true,
         })
-        .where(eq(schema.user.id, 1));
+        .where(eq(schema.user.id, user.id));
 
       return user;
     });

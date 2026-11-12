@@ -13,6 +13,20 @@ export const general = sqliteTable('general_table', {
   metricsJson: int('metrics_json', { mode: 'boolean' }).notNull(),
   metricsPassword: text('metrics_password'),
 
+  /**
+   * enabled on new installations by migration 0015 (the column default is
+   * false since 0010, existing installations keep their value)
+   */
+  liveWireGuardEnabled: int('livewireguard_enabled', { mode: 'boolean' })
+    .notNull()
+    .default(false),
+  liveWireGuardAudience: text('livewireguard_audience')
+    .notNull()
+    .default('livewireguard'),
+
+  /** max clients a non admin user can create themselves, 0 = unlimited */
+  maxClientsPerUser: int('max_clients_per_user').notNull().default(5),
+
   createdAt: text('created_at')
     .notNull()
     .default(sql`(CURRENT_TIMESTAMP)`),

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Users and roles: Admin Panel → Users lists all users, admins can promote / demote, disable / enable users
+- OIDC role mapping: configure admin groups, groups claim and panel login scopes in Admin Panel → OIDC (or `OAUTH_OIDC_ADMIN_GROUPS`, `OAUTH_OIDC_GROUPS_CLAIM`, `OAUTH_OIDC_SCOPES`)
+- Admins can choose the owner when creating a client; clients show their owner
+- CLI: `db:user:list`, `db:user:promote`, `db:admin:reset --username`
+- Max clients per user (Admin Panel → General, default 5, 0 = unlimited) for clients users create themselves and new LiveWireGuard devices
+- The LiveWireGuard endpoint is enabled by default on new installations (existing installations keep their setting)
+- Complete Simplified Chinese (zh-CN) translation; error messages shown in the panel are translated, OAuth login errors are shown on the login / account page instead of a JSON error page
+
+### Changed
+
+- **Breaking**: users auto registered via OAuth are created as normal users instead of admins. With OIDC, members of an admin group become admins. Existing users keep their role
+- Normal users can only rename their own clients; enabling / disabling clients and all other client settings require the admin role
+- Clients created in the Admin Panel belong to the admin creating them (previously always user 1)
+- Disabled users can't use their VPN clients anymore (their peers are removed until the user is enabled again)
+
 ## [15.4.0] - 2026-08-14
 
 ### Added

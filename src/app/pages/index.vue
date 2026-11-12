@@ -1,5 +1,6 @@
 <template>
   <main>
+    <ConnectPanel />
     <Panel>
       <PanelHead>
         <PanelHeadTitle>

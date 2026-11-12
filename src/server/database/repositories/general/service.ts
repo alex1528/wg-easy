@@ -39,6 +39,24 @@ function createPreparedStatement(db: DBType) {
           metricsPrometheus: true,
           metricsJson: true,
           metricsPassword: true,
+          liveWireGuardEnabled: true,
+          liveWireGuardAudience: true,
+          maxClientsPerUser: true,
+        },
+      })
+      .prepare(),
+    getMaxClientsPerUser: db.query.general
+      .findFirst({
+        columns: {
+          maxClientsPerUser: true,
+        },
+      })
+      .prepare(),
+    getLiveWireGuardConfig: db.query.general
+      .findFirst({
+        columns: {
+          liveWireGuardEnabled: true,
+          liveWireGuardAudience: true,
         },
       })
       .prepare(),
@@ -130,5 +148,35 @@ export class GeneralService {
     }
 
     return result;
+  }
+
+  /**
+   * max clients a non admin user can create themselves, 0 = unlimited
+   * @throws
+   */
+  async getMaxClientsPerUser() {
+    const result = await this.#statements.getMaxClientsPerUser.execute();
+
+    if (!result) {
+      throw new Error('General Config not found');
+    }
+
+    return result.maxClientsPerUser;
+  }
+
+  /**
+   * @throws
+   */
+  async getLiveWireGuardConfig() {
+    const result = await this.#statements.getLiveWireGuardConfig.execute();
+
+    if (!result) {
+      throw new Error('General Config not found');
+    }
+
+    return {
+      enabled: result.liveWireGuardEnabled,
+      audience: result.liveWireGuardAudience,
+    };
   }
 }

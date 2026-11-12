@@ -52,8 +52,21 @@ export const client = sqliteTable(
     i3: text(),
     i4: text(),
     i5: text(),
+    // HeaderProtectionKey and RandomTrailers have to match the interface and
+    // are therefore only configurable on the server
+    contentPaddingAddition: text('content_padding_addition'),
+    rekeyAfterTime: text('rekey_after_time'),
+    rekeyTimeout: text('rekey_timeout'),
+    rejectAfterTime: text('reject_after_time'),
+    keepaliveTimeout: text('keepalive_timeout'),
+    maxHandshakeAttempts: text('max_handshake_attempts'),
+    disableCookies: int('disable_cookies', { mode: 'boolean' }),
     dns: text({ mode: 'json' }).$type<string[]>(),
     serverEndpoint: text('server_endpoint'),
+    /** LiveWireGuard device id (X-Device-Id); null = created from panel/migration */
+    deviceId: text('device_id'),
+    /** the client shown as the user's "connect" QR code on the home page */
+    isDefault: int('is_default', { mode: 'boolean' }).notNull().default(false),
     enabled: int({ mode: 'boolean' }).notNull(),
     createdAt: text('created_at')
       .notNull()

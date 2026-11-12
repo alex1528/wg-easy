@@ -20,6 +20,16 @@
               v-model="email"
               :label="$t('user.email')"
             />
+            <FormInfoField
+              id="role"
+              :label="$t('me.role')"
+              :data="roleText"
+              :description="
+                authStore.userData?.roleSource === 'oidc'
+                  ? $t('user.roleSourceOidcDesc')
+                  : $t('user.roleSourceManualDesc')
+              "
+            />
             <FormSecondaryActionField type="submit" :label="$t('form.save')" />
           </FormGroup>
         </FormElement>
@@ -182,8 +192,22 @@
 import { encodeQR } from 'qr';
 
 const authStore = useAuthStore();
+const { t } = useI18n();
+const isAdmin = usePermission('admin', 'any');
+
+const roleText = computed(() => {
+  const role = isAdmin.value ? t('user.roleAdmin') : t('user.roleClient');
+  const source =
+    authStore.userData?.roleSource === 'oidc'
+      ? t('user.roleSourceOidc')
+      : t('user.roleSourceManual');
+  return `${role} · ${source}`;
+});
 
 const { data: authMethods } = await useFetch('/api/auth/methods');
+
+// errors of "link with external provider"
+useOauthError();
 
 const name = ref(authStore.userData?.name);
 const email = ref(authStore.userData?.email);

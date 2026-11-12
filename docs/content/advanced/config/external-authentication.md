@@ -34,7 +34,7 @@ When enabled:
 
 /// warning | Security
 
-Users will be created with Admin Permissions, as the permissions system is not yet implemented. Only enable this if you trust all users that can log in with the OAuth provider.
+New users are created as normal users (not admins). With OIDC, members of the configured admin groups become admins, see [Users and Roles](../../guides/users-and-roles.md#oidc-role-mapping).
 
 Use [Allowed Domains](#allowed-domains) to restrict which users can log in.
 
@@ -129,6 +129,16 @@ The provider needs to be available with HTTPS and have a valid certificate.
 | `OAUTH_OIDC_CLIENT_SECRET` | :white_check_mark: | -       | -                          | OIDC Client Secret |
 | `OAUTH_OIDC_NAME`          | :x:                | OIDC    | `Authelia`                 | Provider Name      |
 
+Role mapping (admin groups):
+
+| Env                       | Required | Default                | Example                         | Description                                      |
+| ------------------------- | -------- | ---------------------- | ------------------------------- | ------------------------------------------------ |
+| `OAUTH_OIDC_ADMIN_GROUPS` | :x:      | -                      | `wg-admins,ops`                 | Comma separated groups that grant the admin role |
+| `OAUTH_OIDC_GROUPS_CLAIM` | :x:      | `groups`               | `realm_access.roles`            | Claim containing the groups                      |
+| `OAUTH_OIDC_SCOPES`       | :x:      | `openid email profile` | `openid email profile groups`   | Scopes requested by the panel login              |
+
+All of them can also be set in **Admin Panel → OIDC**. See [Users and Roles](../../guides/users-and-roles.md#oidc-role-mapping).
+
 ##### Authelia Setup
 
 Generate Client ID and Secret:
@@ -156,6 +166,10 @@ docker run --rm authelia/authelia:latest authelia crypto hash generate pbkdf2 --
   require_pkce: true
   token_endpoint_auth_method: client_secret_post
 ```
+
+##### Authentik Setup
+
+See the dedicated [Authentik SSO guide](../../guides/authentik-sso.md) — a full walkthrough including the custom `email` scope mapping wg-easy requires (`email_verified` must be `true`, which Authentik's default mapping does not provide).
 
 ##### [VoidAuth](https://voidauth.app/#/) Setup
 

@@ -27,7 +27,7 @@
 
 <script lang="ts" setup>
 const data = defineModel<string[] | null>();
-defineProps<{ emptyText?: string[]; name: string }>();
+defineProps<{ emptyText?: string; name: string }>();
 
 function update(e: Event, i: number) {
   const v = (e.target as HTMLInputElement).value;

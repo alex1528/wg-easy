@@ -4,6 +4,7 @@ import { parseCidr } from 'cidr-tools';
 import { wgInterface } from './schema';
 import type { InterfaceCidrUpdateType, InterfaceUpdateType } from './types';
 
+import { WG_ENV } from '#server/utils/config';
 import { nextIPFromUsedAddresses } from '#server/utils/ip';
 import { client as clientSchema } from '#db/schema';
 import type { DBType } from '#db/sqlite';
@@ -28,6 +29,15 @@ function createPreparedStatement(db: DBType) {
       })
       .where(eq(wgInterface.name, sql.placeholder('interface')))
       .prepare(),
+    setClientFilterEnabled: db
+      .update(wgInterface)
+      .set({
+        clientFilterEnabled: sql.placeholder(
+          'clientFilterEnabled'
+        ) as never as boolean,
+      })
+      .where(eq(wgInterface.name, sql.placeholder('interface')))
+      .prepare(),
   };
 }
 
@@ -42,7 +52,7 @@ export class InterfaceService {
 
   async get() {
     const wgInterface = await this.#statements.get.execute({
-      interface: 'wg0',
+      interface: WG_ENV.WG_INTERFACE,
     });
     if (!wgInterface) {
       throw new Error('Interface not found');
@@ -52,7 +62,7 @@ export class InterfaceService {
 
   updateKeyPair(privateKey: string, publicKey: string) {
     return this.#statements.updateKeyPair.execute({
-      interface: 'wg0',
+      interface: WG_ENV.WG_INTERFACE,
       privateKey,
       publicKey,
     });
@@ -62,14 +72,21 @@ export class InterfaceService {
     return this.#db
       .update(wgInterface)
       .set(data)
-      .where(eq(wgInterface.name, 'wg0'))
+      .where(eq(wgInterface.name, WG_ENV.WG_INTERFACE))
       .execute();
   }
 
   setFirewallEnabled(firewallEnabled: boolean) {
     return this.#statements.setFirewallEnabled.execute({
-      interface: 'wg0',
+      interface: WG_ENV.WG_INTERFACE,
       firewallEnabled,
+    });
+  }
+
+  setClientFilterEnabled(clientFilterEnabled: boolean) {
+    return this.#statements.setClientFilterEnabled.execute({
+      interface: WG_ENV.WG_INTERFACE,
+      clientFilterEnabled,
     });
   }
 
@@ -77,7 +94,7 @@ export class InterfaceService {
     return this.#db.transaction(async (tx) => {
       const oldCidr = await tx.query.wgInterface
         .findFirst({
-          where: eq(wgInterface.name, 'wg0'),
+          where: eq(wgInterface.name, WG_ENV.WG_INTERFACE),
           columns: { ipv4Cidr: true, ipv6Cidr: true },
         })
         .execute();
@@ -89,7 +106,7 @@ export class InterfaceService {
       await tx
         .update(wgInterface)
         .set(data)
-        .where(eq(wgInterface.name, 'wg0'))
+        .where(eq(wgInterface.name, WG_ENV.WG_INTERFACE))
         .execute();
 
       const clients = await tx.query.client.findMany().execute();

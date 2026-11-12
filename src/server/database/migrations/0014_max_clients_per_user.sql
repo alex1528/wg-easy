@@ -1,0 +1,1 @@
+ALTER TABLE `general_table` ADD `max_clients_per_user` integer DEFAULT 5 NOT NULL;
