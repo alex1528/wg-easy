@@ -141,6 +141,21 @@ else
   echo "$out" | tail -n 20 >&2
   die "Caddyfile 在 WG_ADMIN_GATE=off 时校验失败，已停止（未推送）"
 fi
+# CADDY_TLS=off（纯 HTTP 测试，不加载证书）时的配置也要能通过校验
+if out="$(docker run --rm -i \
+      -e WG_WEB_HOST=vpn.example.com \
+      -e CADDY_TLS=off \
+      -e ADMIN_IPS="$(cat caddy/admin-ips.caddy)" \
+      -e CROWDSEC_BOUNCER_KEY=validateonly \
+      -e CROWDSEC_LAPI_URL=http://127.0.0.1:8080 \
+      "$BUILD_TAG" \
+      sh -c 'printf "%s\n" "$ADMIN_IPS" > /etc/caddy/admin-ips.caddy && cat > /tmp/Caddyfile && caddy validate --adapter caddyfile --config /tmp/Caddyfile' \
+      < caddy/Caddyfile 2>&1)"; then
+  echo "    ✔ CADDY_TLS=off"
+else
+  echo "$out" | tail -n 20 >&2
+  die "Caddyfile 在 CADDY_TLS=off 时校验失败，已停止（未推送）"
+fi
 
 # ---------- 生成标签 ----------
 DATE="$(date +%Y%m%d)"

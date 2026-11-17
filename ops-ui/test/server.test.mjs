@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp, loadConfig } from '../server.mjs';
+import { createDiagnose } from '../lib/diagnose.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(HERE, '..', '..', 'scripts', 'fixtures', 'caddy-access-sample.jsonl');
@@ -53,6 +54,35 @@ test.after(() => {
 
 const get = (p, h = {}) => fetch(base + p, { headers: { cookie, ...h } });
 const post = (p, body, h = {}) => fetch(base + p, { method: 'POST', headers: { cookie, 'Content-Type': 'application/json', ...h }, body: JSON.stringify(body) });
+
+test('CADDY_TLS: default on keeps Secure cookie; off drops Secure and disables TLS probe', () => {
+  const on = loadConfig({});
+  assert.equal(on.tls, true);
+  assert.equal(on.secureCookie, true);
+  const off = loadConfig({ CADDY_TLS: 'off' });
+  assert.equal(off.tls, false);
+  assert.equal(off.secureCookie, false);
+});
+
+test('diagnose with CADDY_TLS=off probes Caddy over plain HTTP', async () => {
+  const plain = http.createServer((req, res) => { res.writeHead(400); res.end('Missing headers'); });
+  const port = await listen(plain);
+  try {
+    const d = createDiagnose({
+      webHost: '127.0.0.1', caddyHost: '127.0.0.1', caddyPort: port, wgUrl: 'http://127.0.0.1:' + port,
+      adminGate: 'off', logFile: path.join(tmpDir, 'none.log'), timeoutMs: 3000, tls: false,
+    });
+    const r = await d.run('/api/livewireguard/config');
+    const route = r.checks.find((c) => c.title.startsWith('经过 Caddy'));
+    const cert = r.checks.find((c) => c.title === 'HTTPS 证书');
+    assert.equal(route.status, 'ok');
+    assert.match(route.detail, /HTTP 400/);
+    assert.equal(cert.status, 'warn');
+    assert.match(cert.detail, /CADDY_TLS=off/);
+  } finally {
+    plain.close();
+  }
+});
 
 test('static and session', async () => {
   const idx = await fetch(base);

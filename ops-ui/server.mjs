@@ -25,7 +25,9 @@ export function loadConfig(e = env) {
     base, // 如 /ops；空串表示挂在根路径
     password: e.OPS_UI_PASSWORD || '',
     secret: e.OPS_UI_SECRET || '',
-    secureCookie: String(e.OPS_UI_INSECURE_COOKIE || '') !== 'true',
+    // CADDY_TLS=off（Caddy 纯 HTTP，仅测试）：浏览器不会保存带 Secure 的 Cookie，诊断也要走 HTTP
+    tls: String(e.CADDY_TLS || 'on') !== 'off',
+    secureCookie: String(e.OPS_UI_INSECURE_COOKIE || '') !== 'true' && String(e.CADDY_TLS || 'on') !== 'off',
     sessionHours: Number(e.OPS_UI_SESSION_HOURS || 12),
     logFile: e.OPS_UI_LOG || '/var/log/caddy/access.log',
     timeZone: e.TZ || 'Asia/Shanghai',

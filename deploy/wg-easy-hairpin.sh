@@ -147,4 +147,11 @@ esac
 if [ "$#" -eq 0 ]; then
   set -- /usr/bin/dumb-init node server/index.mjs
 fi
+# Caddy 关了 HTTPS（CADDY_TLS=off，仅测试）时浏览器走明文 HTTP：wg-easy 必须 INSECURE=true，
+#   否则登录 Cookie 带 Secure 会被浏览器丢弃（登录后立刻掉线），OIDC 回调地址也会写成 https
+# 用 env 只改传给 wg-easy 的这一个变量，本脚本不给它赋值（见开头 HOST 的教训）
+if [ "${CADDY_TLS:-on}" = off ]; then
+  echo "[hairpin] CADDY_TLS=off：以 INSECURE=true 启动 wg-easy（纯 HTTP 仅用于测试，测完改回 on）"
+  exec env INSECURE=true "$@"
+fi
 exec "$@"

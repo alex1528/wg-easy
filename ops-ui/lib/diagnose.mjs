@@ -1,6 +1,7 @@
 // 连通性诊断：在 ops-ui 容器里能做的检查（对应 diagnose-public.sh 的第 1-9 步中不需要 docker exec 的部分）。
 // 不挂 docker.sock：看不到其他容器内部，只从网络侧验证。需要宿主机 root 的检查（--lines/--trace/--capture）只给出命令。
 // 注意：本文件正则不用反斜杠转义（见 logstats.mjs 说明）。
+import http from 'node:http';
 import https from 'node:https';
 import tls from 'node:tls';
 import dns from 'node:dns';
@@ -36,30 +37,34 @@ async function httpStatus(url, timeoutMs) {
   return res;
 }
 
-/** 直连 Caddy 容器的 HTTPS 端口，按 WG_WEB_HOST 发 SNI 和 Host，拿状态码、X-Wg-Gate 和证书 */
-function httpsProbe({ host, port, webHost, path, timeoutMs }) {
+/** 直连 Caddy 容器的 51821 端口，按 WG_WEB_HOST 发 SNI 和 Host，拿状态码、X-Wg-Gate 和证书。
+ *  useTls=false（CADDY_TLS=off，纯 HTTP 测试）时走明文 HTTP，cert 为 null */
+function caddyProbe({ host, port, webHost, path, timeoutMs, useTls = true }) {
   return new Promise((resolve, reject) => {
     const isIp = net.isIP(webHost) !== 0;
-    const req = https.request({
-      host, port, path, method: 'GET', agent: false, rejectUnauthorized: false, timeout: timeoutMs,
-      ...(isIp ? {} : { servername: webHost }),
+    const opts = {
+      host, port, path, method: 'GET', agent: false, timeout: timeoutMs,
       headers: { Host: `${webHost}:${port}`, 'User-Agent': UA },
-    }, (res) => {
-      const sock = res.socket;
-      const cert = sock.getPeerCertificate?.() || {};
-      let idErr = '';
-      if (!isIp && cert.subject) idErr = tls.checkServerIdentity(webHost, cert)?.message || '';
-      res.resume();
-      resolve({
-        status: res.statusCode,
-        gate: res.headers['x-wg-gate'] || '',
-        cert: {
+    };
+    const onRes = (res) => {
+      const out = { status: res.statusCode, gate: res.headers['x-wg-gate'] || '', cert: null };
+      if (useTls) {
+        const sock = res.socket;
+        const cert = sock.getPeerCertificate?.() || {};
+        let idErr = '';
+        if (!isIp && cert.subject) idErr = tls.checkServerIdentity(webHost, cert)?.message || '';
+        out.cert = {
           subject: cert.subject?.CN || '', issuer: cert.issuer?.O || cert.issuer?.CN || '',
           validTo: cert.valid_to || '', san: cert.subjectaltname || '',
           authorized: !!sock.authorized, authError: String(sock.authorizationError || ''), idErr,
-        },
-      });
-    });
+        };
+      }
+      res.resume();
+      resolve(out);
+    };
+    const req = useTls
+      ? https.request({ ...opts, rejectUnauthorized: false, ...(isIp ? {} : { servername: webHost }) }, onRes)
+      : http.request(opts, onRes);
     req.on('timeout', () => req.destroy(new Error('超时')));
     req.on('error', reject);
     req.end();
@@ -82,8 +87,12 @@ export function createDiagnose(cfg) {
     webHost = '', wgUrl = 'http://wg-easy:51821', caddyHost = 'caddy', caddyPort = 51821,
     publicPaths = '/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*', adminGate = 'on',
     oidcServer = '', dnsServers = ['119.29.29.29', '223.5.5.5'], crowdsec = null, logFile = '',
-    timeoutMs = 8000,
+    timeoutMs = 8000, tls: tlsOn = true,
   } = cfg;
+
+  // CADDY_TLS=off：没有证书可查，单独给一条提醒，免得忘了改回 HTTPS
+  const plainHttp = () => R('warn', 'HTTPS 证书', 'CADDY_TLS=off：Caddy 以纯 HTTP 提供服务，不加载证书（CADDY_TLS_MODE 被忽略）',
+    '只用于测试：口令和 Cookie 都是明文传输。测完把 .env 的 CADDY_TLS 改回 on，再重建 caddy、wg-easy、ops-ui');
 
   async function checkConfig(p) {
     const hit = matchPublic(p, publicPaths);
@@ -109,16 +118,17 @@ export function createDiagnose(cfg) {
     const title = '经过 Caddy（模拟普通客户端，来源是 ops-ui 容器的内网 IP）';
     if (!webHost) return { route: R('skip', title, '未设置 WG_WEB_HOST'), cert: null };
     try {
-      const r = await httpsProbe({ host: caddyHost, port: caddyPort, webHost, path: p, timeoutMs });
+      const r = await caddyProbe({ host: caddyHost, port: caddyPort, webHost, path: p, timeoutMs, useTls: tlsOn });
       let route;
       if (r.status === 403 && r.gate) route = R(matchPublic(p, publicPaths) ? 'bad' : 'warn', title, `403，X-Wg-Gate: ${r.gate}：被管理员 IP 规则拦下`, '路径没匹配上 WG_PUBLIC_PATHS；若 caddy 用的 .env 和 ops-ui 不一致，以 caddy 为准（docker compose up -d --force-recreate caddy）');
       else if (r.status === 403) route = R('bad', title, '403，没有 X-Wg-Gate 头', '多半是 CrowdSec 封禁了来源 IP，见“封禁列表”页');
       else if (r.status === 429) route = R('warn', title, '429：触发限流', '调大 RL_PUBLIC_PER_MIN 或稍后再试');
       else if (r.status === 502 || r.status === 504) route = R('bad', title, `${r.status}：Caddy 连不上 wg-easy`, '见上一项 wg-easy 直连');
       else route = R('ok', title, `HTTP ${r.status}：请求已到 wg-easy，Caddy 这一层没有问题`);
-      return { route, cert: certResult(r.cert) };
+      return { route, cert: r.cert ? certResult(r.cert) : plainHttp() };
     } catch (e) {
-      return { route: R('bad', title, `连不上 ${caddyHost}:${caddyPort}：${errText(e)}`, 'caddy 容器没起来，或 TLS 握手失败：docker logs --tail 60 wg-easy-caddy'), cert: null };
+      return { route: R('bad', title, `连不上 ${caddyHost}:${caddyPort}（${tlsOn ? 'HTTPS' : 'HTTP'}）：${errText(e)}`,
+        'caddy 容器没起来，或 TLS 握手失败：docker logs --tail 60 wg-easy-caddy；caddy 和 ops-ui 的 CADDY_TLS 必须一致（改完两个都要重建）'), cert: null };
     }
   }
 

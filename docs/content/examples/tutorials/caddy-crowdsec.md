@@ -126,6 +126,20 @@ TENCENTCLOUD_SECRET_ID=AKIDxxxxxxxxxxxxxxxx
 TENCENTCLOUD_SECRET_KEY=xxxxxxxxxxxxxxxx
 ```
 
+### 不用证书测试（`CADDY_TLS=off`）
+
+临时测试、不想处理证书时，在 `.env` 里设置：
+
+```ini
+CADDY_TLS=off
+```
+
+- Caddy 改用纯 HTTP，访问 `http://<WG_WEB_HOST>:51821`，不申请也不加载任何证书，`CADDY_TLS_MODE` 被忽略；改回 `on` 即恢复原来的证书模式。
+- wg-easy 会自动以 `INSECURE=true` 启动（否则浏览器丢弃带 Secure 的登录 Cookie，登录后立刻掉线）；ops-ui 的会话 Cookie 也不再带 Secure，诊断改走 HTTP。
+- 同一端口上不再有 308 跳转，日志里也就没有 308 + 403 成对出现的情况。
+- 改完重建：`docker compose -f docker-compose-dirty.yml up -d --force-recreate caddy wg-easy`（启用了 ops-ui 时加上 `ops-ui`）。
+- 只用于测试：登录口令、Cookie 和客户端配置都是明文传输，测完务必改回 `on`。值写错（如 `of`）Caddy 会直接启动失败，不会悄悄退回纯 HTTP。
+
 ### 其他配置项
 
 | 变量                          | 默认值                                                  | 说明                                                                         |

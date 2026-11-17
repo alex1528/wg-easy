@@ -11,7 +11,9 @@ services:
       - PORT=51821
       - HOST=0.0.0.0
       # 浏览器侧经 caddy 走 HTTPS，保持 false（安全 Cookie 生效）
+      # CADDY_TLS=off（纯 HTTP 测试）时由启动包装 deploy/wg-easy-hairpin.sh 自动以 INSECURE=true 启动，这里不用改
       - INSECURE=false
+      - CADDY_TLS=${CADDY_TLS:-on}
       # 只信任 caddy 转发的 X-Forwarded-Host / X-Forwarded-For
       - TRUSTED_PROXIES=10.42.42.43,fdcc:ad94:bacf:61a3::2b
       # VPN 客户端在隧道内访问 Web UI（如“立即同步配置”）时直接在容器内转给 Caddy，不绕公网，见 deploy/wg-easy-hairpin.sh
@@ -99,7 +101,9 @@ services:
     environment:
       # 浏览器访问用的公网 IP 或域名（必填，见 .env）
       - WG_WEB_HOST=${WG_WEB_HOST:?请在 .env 中设置 WG_WEB_HOST（公网 IP 或域名）}
-      # 证书模式：internal | http | tencentcloud | alidns | file
+      # HTTPS 开关：on（默认）= HTTPS，证书按 CADDY_TLS_MODE；off = 纯 HTTP，不用证书，仅测试
+      - CADDY_TLS=${CADDY_TLS:-on}
+      # 证书模式：internal | http | tencentcloud | alidns | file（CADDY_TLS=off 时忽略）
       - CADDY_TLS_MODE=${CADDY_TLS_MODE:-internal}
       # file 模式用的证书和私钥文件名（在 caddy/certs/ 下）
       - CADDY_TLS_CERT_FILE=${CADDY_TLS_CERT_FILE:-cert.pem}
@@ -229,6 +233,8 @@ services:
       CROWDSEC_LAPI_URL: http://crowdsec:8080
       # 以下只用于诊断页，与 caddy 用同一份 .env
       WG_WEB_HOST: ${WG_WEB_HOST:-}
+      # 与 caddy 一致：off 时会话 Cookie 不带 Secure（否则纯 HTTP 下登录不上），诊断改走 HTTP
+      CADDY_TLS: ${CADDY_TLS:-on}
       WG_ADMIN_GATE: ${WG_ADMIN_GATE:-on}
       WG_PUBLIC_PATHS: ${WG_PUBLIC_PATHS:-/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*}
       OAUTH_OIDC_SERVER: ${OAUTH_OIDC_SERVER:-}

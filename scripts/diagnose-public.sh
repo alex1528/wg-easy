@@ -29,6 +29,14 @@ compose_file() {
   if [ -n "$f" ] && [ "$f" != "<no value>" ]; then basename "$f"; else echo docker-compose-dirty.yml; fi
 }
 
+# Caddy 的 HTTPS 开关：CADDY_TLS=off（纯 HTTP，仅测试）时自检请求和给出的命令都用 http://
+web_scheme() {
+  case "$(docker exec wg-easy-caddy printenv CADDY_TLS 2>/dev/null || true)" in
+    off) echo http ;;
+    *) echo https ;;
+  esac
+}
+
 # 把 Caddy 的 JSON 访问日志转成一行：时间 来源IP 方法 状态 路径 耗时 主机 客户端
 # 各字段单独匹配，不依赖 JSON 字段顺序；解析不了的行原样显示（以 ? 开头），不会被静默丢掉
 RE_TS='"ts":([0-9]+)'
@@ -98,7 +106,7 @@ case "${1:-}" in
     sleep 1
     # 自检：从本机发一个请求，证明这个工具本身能看到请求
     if [ -n "$H" ] && command -v curl >/dev/null 2>&1; then
-      curl -sk -o /dev/null --max-time 8 -A diagnose-selftest --resolve "$H:51821:127.0.0.1" "https://$H:51821/api/livewireguard/config" || true
+      curl -sk -o /dev/null --max-time 8 -A diagnose-selftest --resolve "$H:51821:127.0.0.1" "$(web_scheme)://$H:51821/api/livewireguard/config" || true
       sleep 1
       if [ -n "$IP" ]; then
         echo "  （已发自检请求，它的来源不是 $IP，被过滤掉了；想看自检就去掉 IP 参数）"
@@ -237,7 +245,7 @@ case "${1:-}" in
         echo "  ⚠ 不同 DNS 返回的 A 记录不一样：域名按线路 / 地区返回不同地址（智能解析），4G 用户可能被解析到别的 IP"
         for ip in $(echo $a_all | tr ' ' '\n' | sed '/^$/d' | sort -u); do
           echo "    · $ip 的 51821（从本机访问，只说明这个地址上有没有服务在应答）："
-          r="$(curl -sk -o /dev/null -m 6 -w '%{http_code}' --resolve "$h:51821:$ip" "https://$h:51821/api/livewireguard/config" 2>/dev/null || true)"
+          r="$(curl -sk -o /dev/null -m 6 -w '%{http_code}' --resolve "$h:51821:$ip" "$(web_scheme)://$h:51821/api/livewireguard/config" 2>/dev/null || true)"
           echo "      HTTP ${r:-000}（400 = wg-easy 在应答；000 = 不通或不是这套服务）"
         done
       fi
@@ -359,7 +367,7 @@ case "${1:-}" in
     echo
     echo "== 在 4G 热点下的电脑上逐条执行（直接指定线路 IP，绕开智能解析）"
     for ip in $LIPS; do
-      echo "curl -sS -o /dev/null -m 10 -w '%{http_code} %{time_total}s  $ip\\n' --resolve ${H:-vrh.verycloud.cn}:51821:$ip https://${H:-vrh.verycloud.cn}:51821/api/livewireguard/config"
+      echo "curl -sS -o /dev/null -m 10 -w '%{http_code} %{time_total}s  $ip\\n' --resolve ${H:-vrh.verycloud.cn}:51821:$ip $(web_scheme)://${H:-vrh.verycloud.cn}:51821/api/livewireguard/config"
     done
     echo "  每条都应返回 400（Missing headers）；某条超时或 000 = 这条线路的 51821 不通"
     echo
@@ -403,7 +411,7 @@ case "${1:-}" in
     for d in $DEVS; do
       for ad in $(ip -4 -o addr show dev "$d" | awk '{split($4, x, "/"); print x[1]}'); do
         case "$ad" in 10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) continue ;; esac
-        echo "  curl -sS -o /dev/null -m 10 -w '%{http_code}\\n' --resolve $H:$TP:$ad https://$H:$TP/api/livewireguard/config"
+        echo "  curl -sS -o /dev/null -m 10 -w '%{http_code}\\n' --resolve $H:$TP:$ad $(web_scheme)://$H:$TP/api/livewireguard/config"
       done
     done
     echo "  测试期间不要从白名单网络访问，否则会混进统计"
@@ -478,7 +486,7 @@ case "${1:-}" in
       done
     fi
     W_HOST="$(docker exec wg-easy-caddy printenv WG_WEB_HOST 2>/dev/null || true)"
-    [ -z "$W_HOST" ] || URLS="$URLS https://$W_HOST:51821/api/livewireguard/config"
+    [ -z "$W_HOST" ] || URLS="$URLS $(web_scheme)://$W_HOST:51821/api/livewireguard/config"
     echo
     echo "== 在客户端所在网络执行（手机 4G 热点下的电脑；或手机浏览器逐个打开）"
     echo "   任何 HTTP 状态码（200/302/400/401/405）都说明网络通；000 或超时说明这个地址对该网络不可达"
@@ -503,7 +511,11 @@ info() { echo "  · $*"; }
 
 docker ps --format '{{.Names}}' | grep -qx "$C" || { bad "容器 $C 没有运行"; exit 1; }
 HOST="$(docker exec "$C" printenv WG_WEB_HOST 2>/dev/null || true)"
-echo "检查路径：$P    域名：${HOST:-<未知>}"
+SCHEME="$(web_scheme)"
+echo "检查路径：$P    域名：${HOST:-<未知>}    协议：$SCHEME"
+if [ "$SCHEME" = http ]; then
+  echo "  ⚠ CADDY_TLS=off：Caddy 以纯 HTTP 提供服务（仅测试，口令和 Cookie 明文传输），测完把 .env 的 CADDY_TLS 改回 on"
+fi
 
 echo
 echo "== 1. Caddy 容器里的配置是不是新版"
@@ -566,7 +578,7 @@ esac
 echo
 echo "== 3. 经过 Caddy（从本机走域名，来源 IP 不是管理员 IP，模拟普通客户端）"
 if [ -n "$HOST" ] && command -v curl >/dev/null 2>&1; then
-  out="$(curl -sk -o /dev/null -D - --max-time 10 --resolve "$HOST:51821:127.0.0.1" "https://$HOST:51821$P" 2>&1 || true)"
+  out="$(curl -sk -o /dev/null -D - --max-time 10 --resolve "$HOST:51821:127.0.0.1" "$SCHEME://$HOST:51821$P" 2>&1 || true)"
   code="$(printf '%s\n' "$out" | grep -m1 -E '^HTTP/' | awk '{print $2}')"
   gate="$(printf '%s\n' "$out" | grep -i -m1 '^x-wg-gate:' | tr -d '\r' || true)"
   case "$code" in
