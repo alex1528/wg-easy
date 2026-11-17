@@ -91,6 +91,35 @@ test('bouncer key rejected: error names the key source, fingerprint and fix', as
   });
 });
 
+test('diagnose: 404 Endpoint not available means feature/OIDC off, other 404 means missing route', async () => {
+  const srv = http.createServer((req, res) => {
+    if (req.url.startsWith('/api/livewireguard/')) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'not_found', error_description: 'Endpoint not available' }));
+    }
+    res.writeHead(404, { 'Content-Type': 'text/html' });
+    res.end('<h1>Page not found</h1>');
+  });
+  const port = await listen(srv);
+  try {
+    const mk = () => createDiagnose({
+      webHost: '127.0.0.1', caddyHost: '127.0.0.1', caddyPort: port, wgUrl: 'http://127.0.0.1:' + port,
+      adminGate: 'off', logFile: path.join(tmpDir, 'none.log'), timeoutMs: 3000, tls: false,
+    });
+    const wgOf = (r) => r.checks.find((c) => c.title.startsWith('wg-easy 直连'));
+    const a = wgOf(await mk().run('/api/livewireguard/config'));
+    assert.equal(a.status, 'bad');
+    assert.match(a.detail, /Endpoint not available/);
+    assert.match(a.hint, /LiveWireGuard/);
+    assert.doesNotMatch(a.hint, /镜像/);
+    const b = wgOf(await mk().run('/api/nope'));
+    assert.equal(b.status, 'bad');
+    assert.match(b.hint, /镜像/);
+  } finally {
+    srv.close();
+  }
+});
+
 test('diagnose with CADDY_TLS=off probes Caddy over plain HTTP', async () => {
   const plain = http.createServer((req, res) => { res.writeHead(400); res.end('Missing headers'); });
   const port = await listen(plain);

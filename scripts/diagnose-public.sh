@@ -567,8 +567,19 @@ case "$direct" in
   *refused*|*"bad address"*|*"timed out"*)
     bad "连不上 wg-easy：$direct（wg-easy 没起来，看 docker logs --tail 60 $W）" ;;
   *" 404"*)
-    bad "wg-easy 返回 404：当前镜像里没有 $P 这个接口，问题在镜像，不在 Caddy"
-    info "镜像：$(docker inspect -f '{{.Config.Image}}' "$W" 2>/dev/null)" ;;
+    # 404 不一定是镜像缺接口：LiveWireGuard 功能关闭或 OIDC 服务地址 / Client ID 没配置时，
+    #   接口自己返回 404 Endpoint not available（src/server/api/livewireguard/config.get.ts）
+    # caddy 里的 busybox wget 遇到 404 不保存响应体，改用 wg-easy 镜像自带的 node 取响应内容
+    resp="$(docker exec "$W" node -e 'fetch(process.argv[1]).then(async r=>process.stdout.write(r.status+" "+(await r.text()).slice(0,300))).catch(e=>process.stdout.write("ERR "+e.message))' "http://127.0.0.1:51821$P" 2>/dev/null || true)"
+    case "$resp" in
+      *"Endpoint not available"*)
+        bad "wg-easy 返回 404 Endpoint not available：接口存在，但 LiveWireGuard 功能未启用，或 OIDC 服务地址 / Client ID 没配置"
+        info "到 wg-easy 管理后台启用 LiveWireGuard 并配好 OIDC；配好后不带令牌访问应返回 400 Missing headers" ;;
+      *)
+        bad "wg-easy 返回 404：当前镜像里没有 $P 这个接口，问题在镜像，不在 Caddy"
+        [ -z "$resp" ] || info "响应：$(printf '%s' "$resp" | tr -d '\r\n' | head -c 200)"
+        info "镜像：$(docker inspect -f '{{.Config.Image}}' "$W" 2>/dev/null)" ;;
+    esac ;;
   *HTTP/*)
     ok "wg-easy 返回：$(echo "$direct" | sed -E 's/^ *//')（不带客户端令牌时 400/401 都正常）" ;;
   *)

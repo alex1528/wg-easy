@@ -23,6 +23,13 @@ export function matchPublic(p, patterns) {
   return '';
 }
 
+/** wg-easy 的 404 不一定是镜像缺接口：LiveWireGuard 功能关闭，或 OIDC 服务地址 / Client ID 没配置时，
+ *  /api/livewireguard/config 自己返回 404 {"error":"not_found","error_description":"Endpoint not available"}
+ *  （见 src/server/api/livewireguard/config.get.ts 第 2 步），客户端会当作暂时不可用 */
+export function featureOff(body) {
+  return /Endpoint not available/.test(String(body || ''));
+}
+
 export function validPath(p) {
   return typeof p === 'string' && p.length <= 200 && /^[/][!-~]*$/.test(p);
 }
@@ -33,8 +40,8 @@ function errText(e) {
 
 async function httpStatus(url, timeoutMs) {
   const res = await fetch(url, { redirect: 'manual', headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(timeoutMs) });
-  await res.arrayBuffer().catch(() => {});
-  return res;
+  const body = await res.text().catch(() => '');
+  return { status: res.status, body: body.slice(0, 2000) };
 }
 
 /** 直连 Caddy 容器的 51821 端口，按 WG_WEB_HOST 发 SNI 和 Host，拿状态码、X-Wg-Gate 和证书。
@@ -106,7 +113,11 @@ export function createDiagnose(cfg) {
     const title = 'wg-easy 直连（不经过 Caddy）';
     try {
       const res = await httpStatus(wgUrl + p, timeoutMs);
-      if (res.status === 404) return R('bad', title, `${wgUrl}${p} 返回 404`, '当前 wg-easy 镜像没有这个接口，问题在镜像，不在 Caddy');
+      if (res.status === 404 && featureOff(res.body)) {
+        return R('bad', title, `${wgUrl}${p} 返回 404 Endpoint not available：接口存在，但 LiveWireGuard 功能未启用，或 OIDC 服务地址 / Client ID 没配置`,
+          '到 wg-easy 管理后台启用 LiveWireGuard，并配好 OIDC 的服务地址和 Client ID；配好后不带令牌访问这个接口应返回 400 Missing headers。在此之前客户端同步会一直拿到 404 并反复重试');
+      }
+      if (res.status === 404) return R('bad', title, `${wgUrl}${p} 返回 404`, '返回的不是接口自己的 Endpoint not available：当前 wg-easy 镜像没有这个接口，问题在镜像，不在 Caddy');
       if (res.status >= 500) return R('bad', title, `返回 ${res.status}`, '看 docker logs --tail 60 wg-easy');
       return R('ok', title, `返回 HTTP ${res.status}（不带客户端令牌时 400/401 都正常）`);
     } catch (e) {
@@ -123,6 +134,7 @@ export function createDiagnose(cfg) {
       if (r.status === 403 && r.gate) route = R(matchPublic(p, publicPaths) ? 'bad' : 'warn', title, `403，X-Wg-Gate: ${r.gate}：被管理员 IP 规则拦下`, '路径没匹配上 WG_PUBLIC_PATHS；若 caddy 用的 .env 和 ops-ui 不一致，以 caddy 为准（docker compose up -d --force-recreate caddy）');
       else if (r.status === 403) route = R('bad', title, '403，没有 X-Wg-Gate 头', '多半是 CrowdSec 封禁了来源 IP，见“封禁列表”页');
       else if (r.status === 429) route = R('warn', title, '429：触发限流', '调大 RL_PUBLIC_PER_MIN 或稍后再试');
+      else if (r.status === 404) route = R('warn', title, '404：请求已经过 Caddy 到了 wg-easy，是 wg-easy 返回的 404', '原因见上一项“wg-easy 直连”');
       else if (r.status === 502 || r.status === 504) route = R('bad', title, `${r.status}：Caddy 连不上 wg-easy`, '见上一项 wg-easy 直连');
       else route = R('ok', title, `HTTP ${r.status}：请求已到 wg-easy，Caddy 这一层没有问题`);
       return { route, cert: r.cert ? certResult(r.cert) : plainHttp() };
