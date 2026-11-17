@@ -149,7 +149,7 @@ export function createDiagnose(cfg) {
     if (!crowdsec?.configured) return R('skip', title, '未配置 bouncer key');
     try {
       const r = await crowdsec.ping();
-      return R('ok', title, `${crowdsec.url} 可访问，bouncer key 有效（${r.ms} ms）`);
+      return R('ok', title, `${crowdsec.url} 可访问，${crowdsec.keySource} 有效（${r.ms} ms）`);
     } catch (e) {
       return R('bad', title, e.message, 'docker ps 看 wg-easy-crowdsec 是否在运行；docker logs --tail 60 wg-easy-crowdsec');
     }

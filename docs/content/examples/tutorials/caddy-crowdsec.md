@@ -39,12 +39,12 @@ Caddy 处理每个请求的顺序：
 
 ### 端口
 
-| 端口                 | 服务     | 说明                                               |
-| -------------------- | -------- | -------------------------------------------------- |
-| `51821/tcp`          | caddy    | Web UI（HTTPS），同端口的明文 HTTP 自动跳转        |
-| `51820/udp`          | wg-easy  | WireGuard                                          |
-| `80/tcp`             | caddy    | 只有 `http` 证书模式需要，其他模式可以删掉这一行   |
-| `127.0.0.1:5140/udp` | crowdsec | 只在本机监听，接收 wg-easy 日志，外网访问不到      |
+| 端口                 | 服务     | 说明                                             |
+| -------------------- | -------- | ------------------------------------------------ |
+| `51821/tcp`          | caddy    | Web UI（HTTPS），同端口的明文 HTTP 自动跳转      |
+| `51820/udp`          | wg-easy  | WireGuard                                        |
+| `80/tcp`             | caddy    | 只有 `http` 证书模式需要，其他模式可以删掉这一行 |
+| `127.0.0.1:5140/udp` | crowdsec | 只在本机监听，接收 wg-easy 日志，外网访问不到    |
 
 CrowdSec 的本地 API（8080）不对外发布，只有 Caddy（以及启用后的 ops-ui）能通过内部网络访问。运维页面 ops-ui 不占用新端口，经 Caddy 的 `51821/tcp` 下的 `/ops/` 访问。
 
@@ -103,13 +103,13 @@ sed -i "s/^CROWDSEC_BOUNCER_KEY=.*/CROWDSEC_BOUNCER_KEY=$(openssl rand -hex 32)/
 
 ### 选择证书模式
 
-| `CADDY_TLS_MODE`   | 证书                       | 需要填写                                                    | 80 端口 |
-| ------------------ | -------------------------- | ----------------------------------------------------------- | ------- |
-| `internal`（默认） | Caddy 自签                 | 无，`WG_WEB_HOST` 可以是 IP                                 | 不需要  |
-| `http`             | Let's Encrypt，HTTP 验证   | `ACME_EMAIL`；`WG_WEB_HOST` 是解析到本机的域名              | 需要    |
+| `CADDY_TLS_MODE`   | 证书                       | 需要填写                                                          | 80 端口 |
+| ------------------ | -------------------------- | ----------------------------------------------------------------- | ------- |
+| `internal`（默认） | Caddy 自签                 | 无，`WG_WEB_HOST` 可以是 IP                                       | 不需要  |
+| `http`             | Let's Encrypt，HTTP 验证   | `ACME_EMAIL`；`WG_WEB_HOST` 是解析到本机的域名                    | 需要    |
 | `tencentcloud`     | Let's Encrypt，DNS 验证    | `ACME_EMAIL`、`TENCENTCLOUD_SECRET_ID`、`TENCENTCLOUD_SECRET_KEY` | 不需要  |
 | `alidns`           | Let's Encrypt，DNS 验证    | `ACME_EMAIL`、`ALIYUN_ACCESS_KEY_ID`、`ALIYUN_ACCESS_KEY_SECRET`  | 不需要  |
-| `file`             | 已有证书（购买或自行申请）           | 证书和私钥放到 `caddy/certs/`，见下文“使用已有证书”                              | 不需要  |
+| `file`             | 已有证书（购买或自行申请） | 证书和私钥放到 `caddy/certs/`，见下文“使用已有证书”               | 不需要  |
 
 - 只有 IP、没有域名时用 `internal`。浏览器会提示证书不受信任，导入根证书后提示消失（见下文“导入根证书”一节）。
 - 国内服务器上未备案的域名可能被封 80 端口，HTTP 验证会失败，这时用 DNS 验证。
@@ -142,23 +142,23 @@ CADDY_TLS=off
 
 ### 其他配置项
 
-| 变量                          | 默认值                                                  | 说明                                                                         |
-| ----------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `WG_ADMIN_GATE`               | `on`                                                    | `on` 管理后台只允许管理员 IP；`off` 不按来源 IP 限制，所有 IP 都能打开登录页                                          |
-| `WG_PUBLIC_PATHS`             | 见说明                                                     | 所有 IP 都能访问的路径，默认 `/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*`，其余只允许管理员 IP |
-| `RL_PUBLIC_PER_MIN`           | `30`                                                    | 公开接口每个 IP 每分钟的请求上限                                    |
-| `CADDY_HSTS`                  | `max-age=0`                                             | 换成正式证书并稳定运行后改为 `max-age=31536000`                              |
-| `RL_LOGIN_PER_MIN`            | `5`                                                     | 每个 IP 每分钟允许的登录和 2FA 请求次数                                      |
-| `RL_LOGIN_PER_HOUR`           | `30`                                                    | 每个 IP 每小时允许的登录和 2FA 请求次数                                      |
-| `CADDY_DNS_RESOLVERS`         | `119.29.29.29 223.5.5.5`                                | DNS 验证时检查 TXT 记录用的 DNS 服务器                                       |
-| `CROWDSEC_DISABLE_ONLINE_API` | `false`                                                 | `true` 表示只在本地运行，不连 CrowdSec 中央服务器，也收不到社区黑名单        |
-| `CROWDSEC_ENROLL_KEY`         | 空                                                      | 可选，填入后实例会出现在 app.crowdsec.net 控制台                             |
-| `CROWDSEC_IMAGE`              | `crowdsecurity/crowdsec:v1.8.2`                         | Docker Hub 拉不下来时改用 CCR，见“服务器连不上 Docker Hub”                    |
-| `CADDY_BASE_REGISTRY`         | 空                                                       | 编译 Caddy 的基础镜像前缀，末尾带 `/`，如 `ccr.ccs.tencentyun.com/vpn-server/` |
-| `CROWDSEC_NOTIFY`             | 空                                                      | 封禁通知渠道：`wecom`、`dingtalk`、`telegram`，留空不推送，见“封禁通知”一节  |
-| `CADDY_IMAGE`                 | 空                                                      | 服务器直接拉取的 Caddy 镜像；留空则使用本地镜像或现场编译                    |
-| `CADDY_IMAGE_REPO`            | `ccr.ccs.tencentyun.com/vpn-server/caddy-ratelimit-dns` | `scripts/caddy-image.sh` 的推送目标                                          |
-| `CADDY_VERSION`               | `2`                                                     | 插件与最新 Caddy 不兼容导致编译失败时，固定到较早的小版本，如 `2.9`          |
+| 变量                          | 默认值                                                  | 说明                                                                                                            |
+| ----------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `WG_ADMIN_GATE`               | `on`                                                    | `on` 管理后台只允许管理员 IP；`off` 不按来源 IP 限制，所有 IP 都能打开登录页                                    |
+| `WG_PUBLIC_PATHS`             | 见说明                                                  | 所有 IP 都能访问的路径，默认 `/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*`，其余只允许管理员 IP |
+| `RL_PUBLIC_PER_MIN`           | `30`                                                    | 公开接口每个 IP 每分钟的请求上限                                                                                |
+| `CADDY_HSTS`                  | `max-age=0`                                             | 换成正式证书并稳定运行后改为 `max-age=31536000`                                                                 |
+| `RL_LOGIN_PER_MIN`            | `5`                                                     | 每个 IP 每分钟允许的登录和 2FA 请求次数                                                                         |
+| `RL_LOGIN_PER_HOUR`           | `30`                                                    | 每个 IP 每小时允许的登录和 2FA 请求次数                                                                         |
+| `CADDY_DNS_RESOLVERS`         | `119.29.29.29 223.5.5.5`                                | DNS 验证时检查 TXT 记录用的 DNS 服务器                                                                          |
+| `CROWDSEC_DISABLE_ONLINE_API` | `false`                                                 | `true` 表示只在本地运行，不连 CrowdSec 中央服务器，也收不到社区黑名单                                           |
+| `CROWDSEC_ENROLL_KEY`         | 空                                                      | 可选，填入后实例会出现在 app.crowdsec.net 控制台                                                                |
+| `CROWDSEC_IMAGE`              | `crowdsecurity/crowdsec:v1.8.2`                         | Docker Hub 拉不下来时改用 CCR，见“服务器连不上 Docker Hub”                                                      |
+| `CADDY_BASE_REGISTRY`         | 空                                                      | 编译 Caddy 的基础镜像前缀，末尾带 `/`，如 `ccr.ccs.tencentyun.com/vpn-server/`                                  |
+| `CROWDSEC_NOTIFY`             | 空                                                      | 封禁通知渠道：`wecom`、`dingtalk`、`telegram`，留空不推送，见“封禁通知”一节                                     |
+| `CADDY_IMAGE`                 | 空                                                      | 服务器直接拉取的 Caddy 镜像；留空则使用本地镜像或现场编译                                                       |
+| `CADDY_IMAGE_REPO`            | `ccr.ccs.tencentyun.com/vpn-server/caddy-ratelimit-dns` | `scripts/caddy-image.sh` 的推送目标                                                                             |
+| `CADDY_VERSION`               | `2`                                                     | 插件与最新 Caddy 不兼容导致编译失败时，固定到较早的小版本，如 `2.9`                                             |
 
 ### 使用已有证书
 
@@ -432,13 +432,13 @@ docker exec wg-easy-crowdsec cscli alerts delete --ip <测试IP>
 
 规则定义在 `crowdsec/scenarios/wg-easy.yaml`。封禁时长在 `crowdsec/profiles.yaml` 中设置：`wg-easy/2fa-bf` 首次封 24 小时，其余规则首次封 4 小时，同一 IP 再犯时递增（见下文“重复违规递增封禁”）。
 
-| 规则                       | 判断依据                                                    | 触发条件                                 |
-| -------------------------- | ----------------------------------------------------------- | ---------------------------------------- |
-| `wg-easy/password-bf`      | `POST /api/auth/password` 返回 401                          | 同一 IP 超过 10 次（每分钟抵消 1 次）    |
-| `wg-easy/credential-bf`    | 带 `Authorization` 头访问 `/api/*` 仍返回 401               | 同一 IP 超过 10 次（每分钟抵消 1 次）    |
-| `wg-easy/cnf-enum`         | `/cnf/*` 返回 404（链接无效或已被使用）                     | 同一 IP 超过 5 次（每分钟抵消 1 次）     |
-| `wg-easy/rate-limit-abuse` | 收到 Caddy 返回的 429                                       | 同一 IP 超过 20 次（每 30 秒抵消 1 次）  |
-| `wg-easy/2fa-bf`           | wg-easy 日志 `Security failure: type=2fa`（验证码错误）     | 同一 IP 超过 5 次（每 2 分钟抵消 1 次）  |
+| 规则                       | 判断依据                                                           | 触发条件                                    |
+| -------------------------- | ------------------------------------------------------------------ | ------------------------------------------- |
+| `wg-easy/password-bf`      | `POST /api/auth/password` 返回 401                                 | 同一 IP 超过 10 次（每分钟抵消 1 次）       |
+| `wg-easy/credential-bf`    | 带 `Authorization` 头访问 `/api/*` 仍返回 401                      | 同一 IP 超过 10 次（每分钟抵消 1 次）       |
+| `wg-easy/cnf-enum`         | `/cnf/*` 返回 404（链接无效或已被使用）                            | 同一 IP 超过 5 次（每分钟抵消 1 次）        |
+| `wg-easy/rate-limit-abuse` | 收到 Caddy 返回的 429                                              | 同一 IP 超过 20 次（每 30 秒抵消 1 次）     |
+| `wg-easy/2fa-bf`           | wg-easy 日志 `Security failure: type=2fa`（验证码错误）            | 同一 IP 超过 5 次（每 2 分钟抵消 1 次）     |
 | `wg-easy/probe-scan`       | 多个**不同**的 WordPress / PHP 后门 / 管理入口路径返回 403/404/400 | 同一 IP 5 个不同路径（每 10 分钟抵消 1 个） |
 
 另外还会启用 CrowdSec 官方的 `crowdsecurity/caddy` 规则集（目录扫描、已知漏洞探测等），以及官方 `crowdsecurity/http-probing`（通用 403/404 探测）。`wg-easy/probe-scan` 与官方规则互补：这套服务是 Node 程序、没有任何 PHP / WordPress 内容，命中 `*.php`、`/wp-*`、`/wp-content/`、`.env` 等路径一定是扫描器，因此门槛更低、且用 `distinct` 只数不同的路径（同一路径反复请求不重复计数）。明文 HTTP 的 308 跳转不计入这条规则（filter 只认 403/404/400），所以一次探测只算一次，不会因为“308+403 两条日志”翻倍。
@@ -468,11 +468,11 @@ wg-easy 在 2FA 验证码错误时返回 HTTP 200，访问日志看不出来，�
 
 同一个 IP 再次被封时，封禁时长按它过去 7 天内已有的封禁次数递增：
 
-| 规则                                  | 第 1 次 | 第 2 次 | 第 3 次 | 之后          | 上限          |
-| ------------------------------------- | ------- | ------- | ------- | ------------- | ------------- |
-| `wg-easy/2fa-bf`                      | 24h     | 48h     | 72h     | 每次加 24h    | 168h（7 天）  |
-| 其他 wg-easy 规则、CrowdSec 官方规则  | 4h      | 8h      | 12h     | 每次加 4h     | 72h           |
-| 网段封禁                              | 4h      | 4h      | 4h      | 不递增        | -             |
+| 规则                                 | 第 1 次 | 第 2 次 | 第 3 次 | 之后       | 上限         |
+| ------------------------------------ | ------- | ------- | ------- | ---------- | ------------ |
+| `wg-easy/2fa-bf`                     | 24h     | 48h     | 72h     | 每次加 24h | 168h（7 天） |
+| 其他 wg-easy 规则、CrowdSec 官方规则 | 4h      | 8h      | 12h     | 每次加 4h  | 72h          |
+| 网段封禁                             | 4h      | 4h      | 4h      | 不递增     | -            |
 
 - 次数不分规则：一个 IP 先因扫描被封过 2 次，再爆破 2FA，按第 3 次算，封 72 小时
 - 7 天与 CrowdSec 默认的告警保留时长一致，更早的记录会被清理，计数自然归零
@@ -491,12 +491,12 @@ wg-easy 在 2FA 验证码错误时返回 HTTP 200，访问日志看不出来，�
 
 在 `.env` 中选择渠道并填写对应的密钥，其余渠道的密钥留空：
 
-| `CROWDSEC_NOTIFY` | 需要填写                                              | 获取方式                                                                                     |
-| ----------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| 留空（默认）      | 无                                                    | 不推送                                                                                       |
-| `wecom`           | `NOTIFY_WECOM_KEY`                                    | 企业微信群 → 添加群机器人，webhook 地址中 `key=` 后面的部分                                  |
-| `dingtalk`        | `NOTIFY_DINGTALK_TOKEN`                               | 钉钉群设置 → 机器人 → 自定义机器人，webhook 地址中 `access_token=` 后面的部分                |
-| `telegram`        | `NOTIFY_TELEGRAM_TOKEN`、`NOTIFY_TELEGRAM_CHAT_ID`    | @BotFather 创建机器人得到 token；给机器人发一条消息后，访问 `getUpdates` 接口查看 `chat.id`  |
+| `CROWDSEC_NOTIFY` | 需要填写                                           | 获取方式                                                                                    |
+| ----------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 留空（默认）      | 无                                                 | 不推送                                                                                      |
+| `wecom`           | `NOTIFY_WECOM_KEY`                                 | 企业微信群 → 添加群机器人，webhook 地址中 `key=` 后面的部分                                 |
+| `dingtalk`        | `NOTIFY_DINGTALK_TOKEN`                            | 钉钉群设置 → 机器人 → 自定义机器人，webhook 地址中 `access_token=` 后面的部分               |
+| `telegram`        | `NOTIFY_TELEGRAM_TOKEN`、`NOTIFY_TELEGRAM_CHAT_ID` | @BotFather 创建机器人得到 token；给机器人发一条消息后，访问 `getUpdates` 接口查看 `chat.id` |
 
 /// warning | 钉钉安全设置
 
@@ -642,15 +642,15 @@ sudo bash scripts/diagnose-public.sh --trace 60        # 60 秒内在 4G 上测�
 
 脚本依次检查：容器里的 Caddyfile 和管理员名单是不是新版、路径是否在 `WG_PUBLIC_PATHS` 里、wg-easy 自己对这个路径返回什么、经过 Caddy 返回什么、访问日志和 CrowdSec 封禁，列出最近被管理员 IP 规则拦下的路径（客户端需要但没有开放的路径就在这里），再检查 OIDC 服务能否访问，最后（第 9 步）汇总最近的公网扫描 / 漏洞探测噪声。客户端同步超时，而 `--watch` 里没有出现任何请求，说明请求根本没到这台服务器：检查客户端填的服务器地址、上游防火墙或安全组，以及客户端所在网络能否访问 OIDC 服务（第 8 步给出了测试命令）。经过 Caddy 的结果这样看：
 
-| 结果                            | 含义                                                     |
-| ------------------------------- | -------------------------------------------------------- |
-| 308                             | 明文 HTTP 自动跳 HTTPS，紧跟着同一路径的另一条日志才是结果（见“一次扫描为什么有两条日志”） |
-| 403，带 `X-Wg-Gate: admin-only` | 被管理员 IP 判断拦下：路径不在 `WG_PUBLIC_PATHS` 里       |
-| 403，没有 `X-Wg-Gate`           | 来源 IP 被 CrowdSec 封禁，或访问了不公开路径（如 `/wp-admin`、`*.php` 扫描） |
-| 429                             | 触发限流                                                 |
-| 502                             | Caddy 连不上 wg-easy                                     |
-| 没有响应（连接被断开）          | 容器里还是旧版 Caddyfile，需要 `--force-recreate` 重建   |
-| 其他状态码（200、400、401、404）| 请求已经到了 wg-easy；404 表示当前镜像里没有这个接口     |
+| 结果                             | 含义                                                                                       |
+| -------------------------------- | ------------------------------------------------------------------------------------------ |
+| 308                              | 明文 HTTP 自动跳 HTTPS，紧跟着同一路径的另一条日志才是结果（见“一次扫描为什么有两条日志”） |
+| 403，带 `X-Wg-Gate: admin-only`  | 被管理员 IP 判断拦下：路径不在 `WG_PUBLIC_PATHS` 里                                        |
+| 403，没有 `X-Wg-Gate`            | 来源 IP 被 CrowdSec 封禁，或访问了不公开路径（如 `/wp-admin`、`*.php` 扫描）               |
+| 429                              | 触发限流                                                                                   |
+| 502                              | Caddy 连不上 wg-easy                                                                       |
+| 没有响应（连接被断开）           | 容器里还是旧版 Caddyfile，需要 `--force-recreate` 重建                                     |
+| 其他状态码（200、400、401、404） | 请求已经到了 wg-easy；404 表示当前镜像里没有这个接口                                       |
 
 ### 调整封禁时长
 
@@ -659,8 +659,6 @@ sudo bash scripts/diagnose-public.sh --trace 60        # 60 秒内在 4G 上测�
 ```shell
 docker exec wg-easy-crowdsec crowdsec -t
 ```
-
-
 
 ```shell
 docker restart wg-easy-crowdsec
@@ -707,12 +705,12 @@ docker compose -f docker-compose-dirty.yml up -d --force-recreate crowdsec caddy
 
 ### 备份
 
-| 路径                  | 内容                                     |
-| --------------------- | ---------------------------------------- |
-| `data/`               | WireGuard 私钥和 wg-easy 数据库，最重要  |
-| `caddy/data/`         | 证书、私钥、ACME 账号、自签根证书        |
-| `.env`                | 所有配置和密钥                           |
-| `crowdsec_config` 卷  | CrowdSec 配置（可选，丢失后会自动重建）  |
+| 路径                 | 内容                                    |
+| -------------------- | --------------------------------------- |
+| `data/`              | WireGuard 私钥和 wg-easy 数据库，最重要 |
+| `caddy/data/`        | 证书、私钥、ACME 账号、自签根证书       |
+| `.env`               | 所有配置和密钥                          |
+| `crowdsec_config` 卷 | CrowdSec 配置（可选，丢失后会自动重建） |
 
 ### 同步上游 wg-easy（wg-easy-feng）
 
@@ -726,12 +724,12 @@ bash scripts/sync-upstream.sh --continue  # 手工处理完冲突或检查问题
 
 脚本会添加名为 `feng` 的远程，拉取后用 `git merge` 合并（保留双方历史，以后可以反复同步）。冲突按下面的规则自动处理：
 
-| 文件 | 处理 |
-| ---- | ---- |
-| `caddy/`、`crowdsec/`、`deploy/`、本库脚本、`docker-compose-dirty.yml`、本部署文档、`.gitattributes`、`.githooks/` | 保留本库 |
-| `.gitignore` | 两边的行取并集 |
-| `.env.example` | 保留本库，再追加上游新增的变量 |
-| 其余文件（wg-easy 源码、文档、构建文件） | 采用上游 |
+| 文件                                                                                                               | 处理                           |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------ |
+| `caddy/`、`crowdsec/`、`deploy/`、本库脚本、`docker-compose-dirty.yml`、本部署文档、`.gitattributes`、`.githooks/` | 保留本库                       |
+| `.gitignore`                                                                                                       | 两边的行取并集                 |
+| `.env.example`                                                                                                     | 保留本库，再追加上游新增的变量 |
+| 其余文件（wg-easy 源码、文档、构建文件）                                                                           | 采用上游                       |
 
 合并前会建备份分支 `backup/pre-sync-<时间>`；合并后检查本库脚本语法、管理员 IP 名单、部署文件换行符、compose 文件，以及本库自有的 src 改动引用的模块和 `Database.*` 方法在合并结果里是否还存在。检查不通过就不提交，合并结果留在工作区：处理后运行 `--continue`，放弃则 `git merge --abort`。脚本最后会列出“只有本库有的 src 文件”和“本库改动被上游覆盖的文件”，需要人工确认。想全部手工解决冲突时加 `--manual`；上游改用 GitHub 地址时设置 `FENG_URL=https://github.com/feng905/wg-easy.git`。
 
@@ -739,39 +737,39 @@ bash scripts/sync-upstream.sh --continue  # 手工处理完冲突或检查问题
 
 ## 排错
 
-| 现象                                                         | 原因和处理                                                                                                                                 |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| compose 报 `请在 .env 中设置 ...`                            | `WG_WEB_HOST` 或 `CROWDSEC_BOUNCER_KEY` 没有填写                                                                                           |
-| `http://` 访问返回 400 `Client sent an HTTP request to an HTTPS server` | Caddyfile 中站点地址被加了 `bind`，导致 `servers :51821` 匹配不上，跳转失效。去掉 `bind` 即可                              |
-| `http` 模式证书申请失败                                      | 确认域名解析到本机、80 端口公网可达；国内未备案域名可能被封 80 端口，改用 DNS 验证                                                         |
-| DNS 模式证书申请失败                                         | 确认域名托管在所选的云厂商、密钥有云解析权限；在 `docker logs wg-easy-caddy` 中查看具体错误                                                |
-| 编译 Caddy 镜像失败，错误与 `libdns` 有关                    | 插件与最新 Caddy 不兼容，在 `.env` 中设置 `CADDY_VERSION=2.9` 后重新编译                                                                   |
-| Caddy 启动报 `permission denied`                             | 容器去掉了越权写文件的权限，执行 `sudo chown -R root:root caddy/data caddy/config caddy/logs`                                              |
-| 登录不了或频繁返回 429                                       | 多个用户共用一个出口 IP（如公司网络），适当调大 `RL_LOGIN_PER_MIN`，或把该 IP 加入 CrowdSec 白名单                                         |
-| 访问日志里 `client_ip` 全是 Docker 网关地址                  | 见“第 4 步：验证”中的真实 IP 检查，IPv6 需要开启 `ip6tables`                                                                                          |
-| 访问日志里大量 `308` 紧跟同一路径 `403`，路径是 `/wp-admin/`、`/wp-content/.../*.php`、`/myy.php`、`*.php` 等 | 公网 WordPress / PHP 漏洞扫描，已被 Caddy 挡在 wg-easy 之前。一次探测=308(跳 HTTPS)+403(拦下)两条日志，别当成两次攻击；用 `bash scripts/log-stats.sh --scanners` 看规模和来源，`403` 没有 `X-Wg-Gate` 头多半是已被 CrowdSec 封禁，一般无需处理。同一 IP 出现 ≥5 个不同探测路径会触发 `wg-easy/probe-scan` 自动封禁（样本里 3 个还不够） |
-| `cscli bouncers list` 中 caddy 没有拉取记录                  | 两边密钥不一致，按“更换 CrowdSec 通信密钥”一节重新注册                                                                            |
-| `cscli metrics` 中 syslog 行数为 0                           | 检查 Docker 版本（需 20.10+），以及 `docker inspect wg-easy --format '{{.HostConfig.LogConfig}}'` 是否为 syslog 驱动                       |
-| 自己被封了                                                   | 在服务器上执行 `cscli alerts delete --ip <IP>`（解封并清零递增计数），并把自己的 IP 加入 CrowdSec 白名单                                                      |
-| 收不到封禁通知                                               | 先看“封禁通知 → 验证”；再看 `docker logs wg-easy-crowdsec` 中 `http-plugin` 的报错。国内服务器通常连不上 Telegram                          |
-| 拉取镜像报 `TLS handshake timeout`，地址是 `registry-1.docker.io` | 服务器连不上 Docker Hub，见“前置条件 → 服务器连不上 Docker Hub” |
-| 登录页提示“无法通过不安全连接登录。请使用 HTTPS。” | 浏览器地址是 `http://`，而且页面是 wg-easy 直接返回的，没有经过 Caddy：通常是旧的 wg-easy 容器还在占用宿主机 51821（`docker ps` 能看到 `0.0.0.0:51821->51821/tcp` 映射在 wg-easy 上），或者 Caddy 没有运行。确认 Caddy 镜像可用后，执行 `docker compose -f docker-compose-dirty.yml up -d --force-recreate --remove-orphans` |
-| `http` 模式日志报 `Timeout during connect (likely firewall problem)` 或 `Cannot negotiate ALPN protocol` | 80 或 443 端口从公网访问不到，或被其他服务占用。改用 DNS 验证，或用已有证书（`file` 模式） |
-| `file` 模式启动报 `loading certificates` / `no such file` / `permission denied` | 文件名与 `CADDY_TLS_CERT_FILE`、`CADDY_TLS_KEY_FILE` 不一致，或文件属主不是 root。按“使用已有证书”第 2 步设置权限 |
-| 浏览器提示证书不受信任，但证书是购买的 | 证书文件缺少中间证书。使用证书厂商提供的 bundle / fullchain 文件 |
-| VPN 隧道连上后，访问 Web UI 或 OIDC 回调超时，访问其他网站正常 | 流量绕公网回到服务器自己被拦住。确认 `WG_HAIRPIN=true`，并按“隧道内访问 Web UI”检查规则计数 |
-| 多台服务器时，连着一台的隧道同步另一台的配置，提示“不是有效的 JSON” | 隧道内的转发规则没有限定目的地址，请求被当前隧道所在服务器的 Caddy 截走。更新 `deploy/wg-easy-hairpin.sh` 后重建 wg-easy，确认日志里“本机地址”只有本机公网 IP |
-| 所有请求 502，Caddy 日志 `dial tcp 10.42.42.42:51821: connect: connection refused`；wg-easy 日志 `listen EADDRNOTAVAIL ... <公网IP>:51821` | wg-easy 的 `HOST` 环境变量被改成了域名。旧版 `deploy/wg-easy-hairpin.sh` 有这个问题，更新脚本后执行 `docker compose -f docker-compose-dirty.yml up -d --no-build --force-recreate wg-easy` |
-| 管理员打不开后台（403，带 `X-Wg-Gate: admin-only` 头），同步配置正常 | 当前出口 IP 不在 CrowdSec 管理员白名单里，或改了名单后没有运行 `bash scripts/admin-ips.sh` 并重启 Caddy。连着 VPN 隧道时来源是 `10.42.42.42`，同样会被拦下 |
-| 非管理员 IP 的客户端同步配置失败，curl 测 `/api/livewireguard/config` 却正常 | 客户端同步还会访问别的路径（如 OIDC 登录 `/api/auth/oidc/callback`）。运行 `bash scripts/diagnose-public.sh` 看第 6 步列出的被拦路径，加进 `WG_PUBLIC_PATHS` |
-| 非管理员 IP 同步超时，访问日志里没有这个客户端的请求 | 请求没到 Caddy：客户端连的是另一台服务器、上游防火墙只放行部分来源，或者 OIDC 服务（Authentik）只对内网开放，客户端拿不到令牌。用 `diagnose-public.sh --watch` 和第 8 步定位 |
-| 设置 `WG_ADMIN_GATE=off` 后非白名单客户端仍同步超时，`--watch` 里没有记录 | 请求没进入 Caddy 的 HTTP 处理：用 `--capture` 看有没有 TCP 新连接（有 = TLS 握手失败；没有 = 没到服务器），用 `--oidc` 生成的命令在客户端网络上测 OIDC 各端点 |
-| `WG_ADMIN_GATE=off`、不连隧道时，白名单 IP 能同步，非白名单 IP 不能，`--watch` 里没有记录 | App 先直接访问 OIDC 服务（Authentik）登录 / 刷新令牌，再请求 wg-easy。OIDC 的 issuer 只在办公网 / 内网可达（或 Authentik 自己限制了来源 IP）时，外网 App 卡在这一步。用 `--setup` 解码 App 实际使用的 issuer，在非白名单网络上逐条测试；把 Authentik 对外开放（至少 discovery、authorize、token、userinfo、jwks），或换成外网可达的 issuer 地址 |
-| 4G 等外网客户端同步超时、访问日志里没有记录，办公网正常 | 多半是 DNS：域名或 Authentik 有 AAAA 但 IPv6 不通，或智能解析让 4G 线路解析到别的地址。用 `--dns` 检查，删掉 AAAA 或错误的线路记录；见“IPv4 优先（4G 客户端）” |
-| 双线服务器：部分运营商（如 4G）用户同步超时，`--dns` 显示域名解析到两个 IP | 第二条线路没有转发 `51821/tcp`，或回程走错线路。见“双线服务器”，用 `--lines` 和 `--capture` 定位 |
-| 多线服务器：只有公司其他出口（白名单 IP）能同步，4G 超时；`--lines` 显示“Docker 容器回包从 eth3 出去” | 容器回包匹配不到 `from <线路IP>` 策略路由，走了默认路由。`sudo bash deploy/dual-line-route.sh install` |
-| 多线服务器：`dual-line-route.sh status` 显示回包路由正确，4G 仍 TCP 超时 | 线路网卡 `rp_filter=1`，DNAT 到容器的 SYN 被内核丢弃。`sudo bash scripts/diagnose-public.sh --trace` 确认（“rp_filter 新增丢包”大于 0），再 `sudo bash deploy/dual-line-route.sh apply` |
-| `ip rule` 里有大量 `fwmark 0x../0xff` 规则（几十上百条） | 系统里同一条 `from <线路IP> lookup <表>` 被重复添加过多次，0.2.4 版 `dual-line-route.sh` 把每一份重复都当成一条线路。更新到 0.2.5 后执行 `sudo bash deploy/dual-line-route.sh apply`，会先清理本脚本加过的全部规则，再按去重后的线路重建；系统自己的重复 `from` 规则不影响功能，0.2.7 起 `apply` 会顺带清理，用 `sudo bash deploy/dual-line-route.sh dedupe` 查找来源 |
+| 现象                                                                                                                                       | 原因和处理                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| compose 报 `请在 .env 中设置 ...`                                                                                                          | `WG_WEB_HOST` 或 `CROWDSEC_BOUNCER_KEY` 没有填写                                                                                                                                                                                                                                                                                                                      |
+| `http://` 访问返回 400 `Client sent an HTTP request to an HTTPS server`                                                                    | Caddyfile 中站点地址被加了 `bind`，导致 `servers :51821` 匹配不上，跳转失效。去掉 `bind` 即可                                                                                                                                                                                                                                                                         |
+| `http` 模式证书申请失败                                                                                                                    | 确认域名解析到本机、80 端口公网可达；国内未备案域名可能被封 80 端口，改用 DNS 验证                                                                                                                                                                                                                                                                                    |
+| DNS 模式证书申请失败                                                                                                                       | 确认域名托管在所选的云厂商、密钥有云解析权限；在 `docker logs wg-easy-caddy` 中查看具体错误                                                                                                                                                                                                                                                                           |
+| 编译 Caddy 镜像失败，错误与 `libdns` 有关                                                                                                  | 插件与最新 Caddy 不兼容，在 `.env` 中设置 `CADDY_VERSION=2.9` 后重新编译                                                                                                                                                                                                                                                                                              |
+| Caddy 启动报 `permission denied`                                                                                                           | 容器去掉了越权写文件的权限，执行 `sudo chown -R root:root caddy/data caddy/config caddy/logs`                                                                                                                                                                                                                                                                         |
+| 登录不了或频繁返回 429                                                                                                                     | 多个用户共用一个出口 IP（如公司网络），适当调大 `RL_LOGIN_PER_MIN`，或把该 IP 加入 CrowdSec 白名单                                                                                                                                                                                                                                                                    |
+| 访问日志里 `client_ip` 全是 Docker 网关地址                                                                                                | 见“第 4 步：验证”中的真实 IP 检查，IPv6 需要开启 `ip6tables`                                                                                                                                                                                                                                                                                                          |
+| 访问日志里大量 `308` 紧跟同一路径 `403`，路径是 `/wp-admin/`、`/wp-content/.../*.php`、`/myy.php`、`*.php` 等                              | 公网 WordPress / PHP 漏洞扫描，已被 Caddy 挡在 wg-easy 之前。一次探测=308(跳 HTTPS)+403(拦下)两条日志，别当成两次攻击；用 `bash scripts/log-stats.sh --scanners` 看规模和来源，`403` 没有 `X-Wg-Gate` 头多半是已被 CrowdSec 封禁，一般无需处理。同一 IP 出现 ≥5 个不同探测路径会触发 `wg-easy/probe-scan` 自动封禁（样本里 3 个还不够）                               |
+| `cscli bouncers list` 中 caddy 没有拉取记录                                                                                                | 两边密钥不一致，按“更换 CrowdSec 通信密钥”一节重新注册                                                                                                                                                                                                                                                                                                                |
+| `cscli metrics` 中 syslog 行数为 0                                                                                                         | 检查 Docker 版本（需 20.10+），以及 `docker inspect wg-easy --format '{{.HostConfig.LogConfig}}'` 是否为 syslog 驱动                                                                                                                                                                                                                                                  |
+| 自己被封了                                                                                                                                 | 在服务器上执行 `cscli alerts delete --ip <IP>`（解封并清零递增计数），并把自己的 IP 加入 CrowdSec 白名单                                                                                                                                                                                                                                                              |
+| 收不到封禁通知                                                                                                                             | 先看“封禁通知 → 验证”；再看 `docker logs wg-easy-crowdsec` 中 `http-plugin` 的报错。国内服务器通常连不上 Telegram                                                                                                                                                                                                                                                     |
+| 拉取镜像报 `TLS handshake timeout`，地址是 `registry-1.docker.io`                                                                          | 服务器连不上 Docker Hub，见“前置条件 → 服务器连不上 Docker Hub”                                                                                                                                                                                                                                                                                                       |
+| 登录页提示“无法通过不安全连接登录。请使用 HTTPS。”                                                                                         | 浏览器地址是 `http://`，而且页面是 wg-easy 直接返回的，没有经过 Caddy：通常是旧的 wg-easy 容器还在占用宿主机 51821（`docker ps` 能看到 `0.0.0.0:51821->51821/tcp` 映射在 wg-easy 上），或者 Caddy 没有运行。确认 Caddy 镜像可用后，执行 `docker compose -f docker-compose-dirty.yml up -d --force-recreate --remove-orphans`                                          |
+| `http` 模式日志报 `Timeout during connect (likely firewall problem)` 或 `Cannot negotiate ALPN protocol`                                   | 80 或 443 端口从公网访问不到，或被其他服务占用。改用 DNS 验证，或用已有证书（`file` 模式）                                                                                                                                                                                                                                                                            |
+| `file` 模式启动报 `loading certificates` / `no such file` / `permission denied`                                                            | 文件名与 `CADDY_TLS_CERT_FILE`、`CADDY_TLS_KEY_FILE` 不一致，或文件属主不是 root。按“使用已有证书”第 2 步设置权限                                                                                                                                                                                                                                                     |
+| 浏览器提示证书不受信任，但证书是购买的                                                                                                     | 证书文件缺少中间证书。使用证书厂商提供的 bundle / fullchain 文件                                                                                                                                                                                                                                                                                                      |
+| VPN 隧道连上后，访问 Web UI 或 OIDC 回调超时，访问其他网站正常                                                                             | 流量绕公网回到服务器自己被拦住。确认 `WG_HAIRPIN=true`，并按“隧道内访问 Web UI”检查规则计数                                                                                                                                                                                                                                                                           |
+| 多台服务器时，连着一台的隧道同步另一台的配置，提示“不是有效的 JSON”                                                                        | 隧道内的转发规则没有限定目的地址，请求被当前隧道所在服务器的 Caddy 截走。更新 `deploy/wg-easy-hairpin.sh` 后重建 wg-easy，确认日志里“本机地址”只有本机公网 IP                                                                                                                                                                                                         |
+| 所有请求 502，Caddy 日志 `dial tcp 10.42.42.42:51821: connect: connection refused`；wg-easy 日志 `listen EADDRNOTAVAIL ... <公网IP>:51821` | wg-easy 的 `HOST` 环境变量被改成了域名。旧版 `deploy/wg-easy-hairpin.sh` 有这个问题，更新脚本后执行 `docker compose -f docker-compose-dirty.yml up -d --no-build --force-recreate wg-easy`                                                                                                                                                                            |
+| 管理员打不开后台（403，带 `X-Wg-Gate: admin-only` 头），同步配置正常                                                                       | 当前出口 IP 不在 CrowdSec 管理员白名单里，或改了名单后没有运行 `bash scripts/admin-ips.sh` 并重启 Caddy。连着 VPN 隧道时来源是 `10.42.42.42`，同样会被拦下                                                                                                                                                                                                            |
+| 非管理员 IP 的客户端同步配置失败，curl 测 `/api/livewireguard/config` 却正常                                                               | 客户端同步还会访问别的路径（如 OIDC 登录 `/api/auth/oidc/callback`）。运行 `bash scripts/diagnose-public.sh` 看第 6 步列出的被拦路径，加进 `WG_PUBLIC_PATHS`                                                                                                                                                                                                          |
+| 非管理员 IP 同步超时，访问日志里没有这个客户端的请求                                                                                       | 请求没到 Caddy：客户端连的是另一台服务器、上游防火墙只放行部分来源，或者 OIDC 服务（Authentik）只对内网开放，客户端拿不到令牌。用 `diagnose-public.sh --watch` 和第 8 步定位                                                                                                                                                                                          |
+| 设置 `WG_ADMIN_GATE=off` 后非白名单客户端仍同步超时，`--watch` 里没有记录                                                                  | 请求没进入 Caddy 的 HTTP 处理：用 `--capture` 看有没有 TCP 新连接（有 = TLS 握手失败；没有 = 没到服务器），用 `--oidc` 生成的命令在客户端网络上测 OIDC 各端点                                                                                                                                                                                                         |
+| `WG_ADMIN_GATE=off`、不连隧道时，白名单 IP 能同步，非白名单 IP 不能，`--watch` 里没有记录                                                  | App 先直接访问 OIDC 服务（Authentik）登录 / 刷新令牌，再请求 wg-easy。OIDC 的 issuer 只在办公网 / 内网可达（或 Authentik 自己限制了来源 IP）时，外网 App 卡在这一步。用 `--setup` 解码 App 实际使用的 issuer，在非白名单网络上逐条测试；把 Authentik 对外开放（至少 discovery、authorize、token、userinfo、jwks），或换成外网可达的 issuer 地址                       |
+| 4G 等外网客户端同步超时、访问日志里没有记录，办公网正常                                                                                    | 多半是 DNS：域名或 Authentik 有 AAAA 但 IPv6 不通，或智能解析让 4G 线路解析到别的地址。用 `--dns` 检查，删掉 AAAA 或错误的线路记录；见“IPv4 优先（4G 客户端）”                                                                                                                                                                                                        |
+| 双线服务器：部分运营商（如 4G）用户同步超时，`--dns` 显示域名解析到两个 IP                                                                 | 第二条线路没有转发 `51821/tcp`，或回程走错线路。见“双线服务器”，用 `--lines` 和 `--capture` 定位                                                                                                                                                                                                                                                                      |
+| 多线服务器：只有公司其他出口（白名单 IP）能同步，4G 超时；`--lines` 显示“Docker 容器回包从 eth3 出去”                                      | 容器回包匹配不到 `from <线路IP>` 策略路由，走了默认路由。`sudo bash deploy/dual-line-route.sh install`                                                                                                                                                                                                                                                                |
+| 多线服务器：`dual-line-route.sh status` 显示回包路由正确，4G 仍 TCP 超时                                                                   | 线路网卡 `rp_filter=1`，DNAT 到容器的 SYN 被内核丢弃。`sudo bash scripts/diagnose-public.sh --trace` 确认（“rp_filter 新增丢包”大于 0），再 `sudo bash deploy/dual-line-route.sh apply`                                                                                                                                                                               |
+| `ip rule` 里有大量 `fwmark 0x../0xff` 规则（几十上百条）                                                                                   | 系统里同一条 `from <线路IP> lookup <表>` 被重复添加过多次，0.2.4 版 `dual-line-route.sh` 把每一份重复都当成一条线路。更新到 0.2.5 后执行 `sudo bash deploy/dual-line-route.sh apply`，会先清理本脚本加过的全部规则，再按去重后的线路重建；系统自己的重复 `from` 规则不影响功能，0.2.7 起 `apply` 会顺带清理，用 `sudo bash deploy/dual-line-route.sh dedupe` 查找来源 |
 
 ## 已知限制
 

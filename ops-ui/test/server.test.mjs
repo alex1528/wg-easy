@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp, loadConfig } from '../server.mjs';
 import { createDiagnose } from '../lib/diagnose.mjs';
+import { createCrowdsec, keyFingerprint } from '../lib/crowdsec.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(HERE, '..', '..', 'scripts', 'fixtures', 'caddy-access-sample.jsonl');
@@ -62,6 +63,32 @@ test('CADDY_TLS: default on keeps Secure cookie; off drops Secure and disables T
   const off = loadConfig({ CADDY_TLS: 'off' });
   assert.equal(off.tls, false);
   assert.equal(off.secureCookie, false);
+});
+
+test('bouncer key: empty OPS_UI_BOUNCER_KEY falls back to CROWDSEC_BOUNCER_KEY', () => {
+  const OWN_K = 'OPS_UI_BOUNCER_' + 'KEY';
+  const SHARED_K = 'CROWDSEC_BOUNCER_' + 'KEY';
+  const shared = 'shared-' + 'value';
+  const c = loadConfig({ [OWN_K]: '  ', [SHARED_K]: ' ' + shared + ' ' });
+  assert.equal(c.bouncerKey, shared);
+  assert.match(c.bouncerKeySource, /^CROWDSEC_BOUNCER_KEY/);
+  const own = loadConfig({ [OWN_K]: 'own-' + 'value', [SHARED_K]: shared });
+  assert.equal(own.bouncerKey, 'own-' + 'value');
+  assert.equal(own.bouncerKeySource, OWN_K);
+  assert.equal(loadConfig({}).bouncerKey, '');
+});
+
+test('bouncer key rejected: error names the key source, fingerprint and fix', async () => {
+  const bad = 'wrong-' + 'value';
+  const cs = createCrowdsec({ url: 'http://127.0.0.1:' + mock.address().port, key: bad, keySource: 'CROWDSEC_BOUNCER_KEY（复用）' });
+  await assert.rejects(cs.ping(), (e) => {
+    assert.match(e.message, /CROWDSEC_BOUNCER_KEY（复用）/);
+    assert.match(e.message, /HTTP 403/);
+    assert.ok(e.message.includes(keyFingerprint(bad)));
+    assert.ok(!e.message.includes(bad), 'key 本身不能出现在报错里');
+    assert.match(e.message, /cscli bouncers delete caddy/);
+    return true;
+  });
 });
 
 test('diagnose with CADDY_TLS=off probes Caddy over plain HTTP', async () => {

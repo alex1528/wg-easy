@@ -3,6 +3,8 @@
 // 所以即使和 Caddy 共用同一个 bouncer key，也不会打乱 Caddy 的增量拉取。
 // bouncer 接口只能读，不能解封；解封仍用 cscli（页面上给出可复制的命令）。
 
+import crypto from 'node:crypto';
+
 // 本地产生的决策来源；CAPI / lists 是社区黑名单，可能有上万条，默认不列出
 export const LOCAL_ORIGINS = ['crowdsec', 'cscli', 'console', 'appsec'];
 
@@ -19,9 +21,15 @@ export function parseGoDuration(s) {
   return neg ? -total : total;
 }
 
-export function createCrowdsec({ url, key, timeoutMs = 8000 } = {}) {
+/** key 的指纹（sha256 前 8 位）：用来和服务器上 .env 里的值对比，不暴露 key 本身 */
+export function keyFingerprint(k) {
+  return k ? crypto.createHash('sha256').update(String(k)).digest('hex').slice(0, 8) : '';
+}
+
+export function createCrowdsec({ url, key, keySource = '', timeoutMs = 8000 } = {}) {
   const baseUrl = String(url || '').replace(/[/]+$/, '');
   const configured = !!(baseUrl && key);
+  const source = keySource || 'bouncer key';
 
   async function call(pathAndQuery) {
     if (!configured) throw new Error('未配置 CrowdSec（CROWDSEC_LAPI_URL / OPS_UI_BOUNCER_KEY）');
@@ -35,7 +43,15 @@ export function createCrowdsec({ url, key, timeoutMs = 8000 } = {}) {
       throw new Error(`连不上 CrowdSec 本地 API ${baseUrl}：${e.cause?.code || e.message}`);
     }
     if (res.status === 401 || res.status === 403) {
-      throw new Error('CrowdSec 拒绝了 bouncer key：检查 OPS_UI_BOUNCER_KEY（或 CROWDSEC_BOUNCER_KEY）是否已注册，cscli bouncers list');
+      const body = (await res.text().catch(() => '')).replace(/[\r\n]+/g, ' ').trim().slice(0, 160);
+      throw new Error(
+        `CrowdSec 拒绝了当前使用的 ${source}（HTTP ${res.status}${body ? '：' + body : ''}；`
+        + `key 长度 ${String(key).length}，sha256 前 8 位 ${keyFingerprint(key)}）。`
+        + '最常见的原因：CrowdSec 只在 bouncer「caddy」第一次注册时读取 CROWDSEC_BOUNCER_KEY，之后改了 .env 里的值，已注册的 key 不会跟着变——'
+        + '这时 Caddy 拉取封禁名单同样会被拒，封禁实际没有生效。'
+        + '对比：在 wg-easy 目录执行 grep ^CROWDSEC_BOUNCER_KEY= .env | cut -d= -f2- | tr -d "[:space:]" | sha256sum | cut -c1-8；'
+        + '修复：docker exec wg-easy-crowdsec cscli bouncers delete caddy && docker restart wg-easy-crowdsec（按 .env 重新注册），'
+        + '然后 docker compose -f docker-compose-dirty.yml up -d --force-recreate caddy ops-ui；cscli bouncers list 可看 caddy 最近一次拉取时间');
     }
     if (!res.ok) throw new Error(`CrowdSec 返回 HTTP ${res.status}`);
     const txt = await res.text();
@@ -92,5 +108,5 @@ export function createCrowdsec({ url, key, timeoutMs = 8000 } = {}) {
     return { ok: true, ms: Date.now() - t0 };
   }
 
-  return { configured, decisions, ping, url: baseUrl };
+  return { configured, decisions, ping, url: baseUrl, keySource: source };
 }

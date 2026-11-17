@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeStats, listLogFiles, parseSince, makeTimeFmt, explain, sigOf } from './lib/logstats.mjs';
 import { createAuth } from './lib/auth.mjs';
-import { createCrowdsec } from './lib/crowdsec.mjs';
+import { createCrowdsec, keyFingerprint } from './lib/crowdsec.mjs';
 import { createTailer } from './lib/live.mjs';
 import { createDiagnose, validPath } from './lib/diagnose.mjs';
 
@@ -16,6 +16,16 @@ const NL = String.fromCharCode(10);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const env = process.env;
 const list = (v) => String(v || '').split(/[ ,]+/).filter(Boolean);
+
+/** 查询封禁用的 key：OPS_UI_BOUNCER_KEY 留空（或只有空白）时复用 caddy 的 CROWDSEC_BOUNCER_KEY。
+ *  同时返回来源，报错时说清楚到底用的是哪一个 */
+export function bouncerKeyOf(e) {
+  const own = String(e.OPS_UI_BOUNCER_KEY || '').trim();
+  if (own) return { bouncerKey: own, bouncerKeySource: 'OPS_UI_BOUNCER_KEY' };
+  const shared = String(e.CROWDSEC_BOUNCER_KEY || '').trim();
+  if (shared) return { bouncerKey: shared, bouncerKeySource: 'CROWDSEC_BOUNCER_KEY（OPS_UI_BOUNCER_KEY 留空，复用 caddy 的 key）' };
+  return { bouncerKey: '', bouncerKeySource: '' };
+}
 
 export function loadConfig(e = env) {
   const base = ('/' + String(e.OPS_UI_BASE || '/ops').replace(/^[/]+|[/]+$/g, '')).replace(/^[/]$/, '');
@@ -33,7 +43,7 @@ export function loadConfig(e = env) {
     timeZone: e.TZ || 'Asia/Shanghai',
     trustedProxies: list(e.OPS_UI_TRUSTED_PROXIES || '10.42.42.43 fdcc:ad94:bacf:61a3::2b 127.0.0.1 ::1'),
     crowdsecUrl: e.CROWDSEC_LAPI_URL || 'http://crowdsec:8080',
-    bouncerKey: e.OPS_UI_BOUNCER_KEY || e.CROWDSEC_BOUNCER_KEY || '',
+    ...bouncerKeyOf(e),
     webHost: e.WG_WEB_HOST || '',
     wgUrl: e.OPS_UI_WG_URL || 'http://wg-easy:51821',
     caddyHost: e.OPS_UI_CADDY_HOST || 'caddy',
@@ -60,7 +70,7 @@ export function createApp(cfg = loadConfig()) {
     password: cfg.password, secret: cfg.secret, ttlSec: cfg.sessionHours * 3600,
     cookiePath: (cfg.base || '') + '/', secureCookie: cfg.secureCookie,
   });
-  const crowdsec = createCrowdsec({ url: cfg.crowdsecUrl, key: cfg.bouncerKey });
+  const crowdsec = createCrowdsec({ url: cfg.crowdsecUrl, key: cfg.bouncerKey, keySource: cfg.bouncerKeySource });
   const tailer = createTailer({ file: cfg.logFile });
   const diag = createDiagnose({ ...cfg, crowdsec });
   const { fmtTime } = makeTimeFmt(cfg.timeZone);
@@ -247,6 +257,7 @@ if (isMain) {
   const { server, cfg } = createApp();
   if (!cfg.password) console.warn('[ops-ui] ⚠ 未设置 OPS_UI_PASSWORD：页面能打开但无法登录');
   if (!cfg.bouncerKey) console.warn('[ops-ui] ⚠ 未设置 OPS_UI_BOUNCER_KEY / CROWDSEC_BOUNCER_KEY：封禁列表不可用');
+  else console.log(`[ops-ui] 封禁查询使用 ${cfg.bouncerKeySource}，sha256 前 8 位 ${keyFingerprint(cfg.bouncerKey)}`);
   server.listen(cfg.port, cfg.host, () => console.log(`[ops-ui] 监听 ${cfg.host}:${cfg.port}${cfg.base}/，日志 ${cfg.logFile}`));
   const bye = () => server.close(() => process.exit(0));
   process.on('SIGTERM', bye);
