@@ -107,7 +107,8 @@
 		Referrer-Policy "same-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 		# 只放不影响 Nuxt 内联脚本的指令（禁止被嵌入 iframe、禁插件、锁定 base）
-		Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+		# ? = 后端没设置时才加：ops-ui 自带更严格的 CSP，不能被这里覆盖
+		?Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
 		-Server
 		-X-Powered-By
 		defer
@@ -163,7 +164,7 @@
 			zone auth_login_min {
 				match {
 					method POST
-					path /api/auth/password /api/auth/verify-2fa
+					path /api/auth/password /api/auth/verify-2fa /ops/api/login
 				}
 				key {remote_host}
 				events {$RL_LOGIN_PER_MIN:5}
@@ -174,7 +175,7 @@
 			zone auth_login_hour {
 				match {
 					method POST
-					path /api/auth/password /api/auth/verify-2fa
+					path /api/auth/password /api/auth/verify-2fa /ops/api/login
 				}
 				key {remote_host}
 				events {$RL_LOGIN_PER_HOUR:30}
@@ -225,9 +226,15 @@
 			log_key
 		}
 
+		# ---------- 4. 运维页面 ops-ui（/ops/，见 ops-ui/）----------
+		# 放在压缩之前：实时请求用 SSE，压缩会把事件攒着不发
+		# 只有 COMPOSE_PROFILES=ops 时才有这个容器；没启用时访问 /ops 返回 502，不影响其他路径
+		@ops path /ops /ops/*
+		reverse_proxy @ops ops-ui:8080
+
 		encode zstd gzip
 
-		# ---------- 4. 转发到 wg-easy 容器内部的纯 HTTP 端口 ----------
+		# ---------- 5. 转发到 wg-easy 容器内部的纯 HTTP 端口 ----------
 		reverse_proxy wg-easy:51821
 	}
 }

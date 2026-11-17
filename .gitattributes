@@ -5,4 +5,5 @@
 caddy/** text eol=lf
 crowdsec/** text eol=lf
 docker-compose-dirty.yml text eol=lf
+ops-ui/** text eol=lf
 .env.example text eol=lf

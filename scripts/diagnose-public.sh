@@ -5,6 +5,7 @@
 #   bash scripts/diagnose-public.sh                          # 默认检查 /api/livewireguard/config
 #   bash scripts/diagnose-public.sh /api/auth/oidc/callback  # 检查其他路径
 #   bash scripts/diagnose-public.sh --ip <客户端公网IP>      # 列出这个 IP 最近的全部请求（看客户端同步时访问了什么）
+#   bash scripts/diagnose-public.sh --stats [log-stats.sh 参数] # 全量统计：状态码分布、扫描探测识别、来源/路径排行（转交 log-stats.sh）
 #   bash scripts/diagnose-public.sh --watch [客户端公网IP]   # 实时显示请求：运行后在客户端点“立即同步配置”
 #   sudo bash scripts/diagnose-public.sh --capture [客户端公网IP]  # 抓 TCP 新连接：和 --watch 对照，区分“没到服务器”和“TLS 握手失败”
 #   bash scripts/diagnose-public.sh --oidc                   # 列出客户端登录要访问的 OIDC 端点，并生成在客户端网络上执行的测试命令
@@ -53,10 +54,18 @@ fmt() {
 }
 legend() {
   echo "  列：时间 来源IP 方法 状态 路径 耗时 主机 客户端(User-Agent)"
-  echo "  状态 0 = 请求处理完之前连接已断开（客户端先超时放弃了，看耗时）；403 = 被拦；429 = 限流；502/504 = 后端问题"
+  echo "  状态 0 = 请求处理完之前连接已断开（客户端先超时放弃了，看耗时）；429 = 限流；502/504 = 后端问题"
+  echo "  308 = 明文 HTTP(:80) 自动跳到 https://<域名>:51821，紧跟着同一路径的 403 才是真正的结果（一次访问两条日志，别重复计数）"
+  echo "  403 再看响应头：带 X-Wg-Gate: admin-only = 管理员 IP 规则拦下；没有 = CrowdSec 已封禁该 IP 或访问了不公开路径（如 /wp-admin、*.php 扫描）"
+  echo "  想看全量分布 / 扫描者排行：bash scripts/log-stats.sh（或本脚本 --stats）"
 }
 
 case "${1:-}" in
+  --stats)
+    # 全量统计 / 扫描探测分析交给 log-stats.sh；后面的参数原样透传（--since/--ip/--json 等）
+    shift
+    exec bash scripts/log-stats.sh "$@"
+    ;;
   --ip)
     IP="${2:-}"; [ -n "$IP" ] || { echo "用法：$0 --ip <客户端公网IP>"; exit 2; }
     [ -f "$LOG" ] || { echo "没有 $LOG"; exit 1; }
@@ -637,4 +646,32 @@ else
   info "  curl -sS -o /dev/null -w '%{http_code} %{time_total}s\\n' $DISC"
   info "超时说明 OIDC 服务只对办公网/内网开放：客户端拿不到令牌，同步就会超时，请求也不会出现在本机 Caddy 日志里"
   info "完整的端点列表和测试命令：bash scripts/diagnose-public.sh --oidc"
+fi
+
+echo
+echo "== 9. 公网扫描 / 漏洞探测噪声（WordPress、*.php、管理入口等）"
+# 这层只是“看噪声规模与是否已拦住”，不改变封禁逻辑；完整统计用 log-stats.sh
+if [ -f caddy/logs/access.log ]; then
+  # 从最近 20000 行里挑出命中扫描特征的结果行（非 308），按“来源IP 特征 路径”聚合
+  probes="$(tail -n 20000 caddy/logs/access.log \
+    | grep -E '"uri":"/(wp-|wp-content/|wp-includes/|wordpress/|xmlrpc\.php|admin|administrator|phpmyadmin|pma|myadmin|cpanel|webmail|actuator|solr|jenkins|druid|hudson|cgi-bin|shell|cmd|eval)|"uri":"[^"?]*\.(php|phps|phtml|env|git|svn|aws|htpasswd|htaccess)' \
+    | grep -v '"status":308' \
+    | sed -E 's/.*"client_ip":"([^"]*)".*"method":"([A-Z]+)".*"uri":"([^"?]*).*"status":([0-9]+).*/\1 \4 \3/' \
+    | sort | uniq -c | sort -rn | head -n 12)"
+  if [ -n "$probes" ]; then
+    echo "  最近命中扫描特征、且已被记录结果的请求（来源IP 状态 路径 / 次数）："
+    echo "$probes" | sed 's/^/  · /'
+    # 只数「同样命中扫描特征的 308」，与上面的结果行口径一致；不要把所有 308（含正常访问跳转）混进来
+    n308="$(tail -n 20000 caddy/logs/access.log \
+      | grep -E '"uri":"/(wp-|wp-content/|wp-includes/|wordpress/|xmlrpc\.php|admin|administrator|phpmyadmin|pma|myadmin|cpanel|webmail|actuator|solr|jenkins|druid|hudson|cgi-bin|shell|cmd|eval)|"uri":"[^"?]*\.(php|phps|phtml|env|git|svn|aws|htpasswd|htaccess)' \
+      | grep -c '"status":308' || true)"
+    info "同批扫描的明文跳转(308)另记 ${n308:-0} 条：扫描一次会产生 308+403 两条日志，别当成两次攻击"
+    info "403 没有 X-Wg-Gate 头 = 多半已被 CrowdSec 封禁或路径不公开；这正是防护在生效，一般无需处理"
+    info "看全量分布、趋势和扫描者排行：bash scripts/log-stats.sh（--scanners / --since 2h / --json）"
+  else
+    info "最近没有命中扫描特征的请求（或访问日志轮转了）"
+    info "看完整统计：bash scripts/diagnose-public.sh --stats"
+  fi
+else
+  info "没有 caddy/logs/access.log"
 fi

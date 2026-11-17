@@ -21,7 +21,7 @@ decisions:
 duration_expr: "Sprintf('%dh', (GetDecisionsSinceCount(Alert.GetValue(), '168h') + 1) * 24 > 168 ? 168 : (GetDecisionsSinceCount(Alert.GetValue(), '168h') + 1) * 24)"
 on_success: break
 ---
-# 2. 其他 wg-easy 专用规则（密码爆破、凭据爆破、链接枚举、持续触发限流）
+# 2. 其他 wg-easy 专用规则（密码爆破、凭据爆破、链接枚举、持续触发限流、公网漏洞扫描）
 #    4h → 8h → 12h → …，上限 72h
 name: wg_easy_ip_remediation
 filters:

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>wg-easy 运维</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 登录 -->
+  <section id="login" class="login hidden">
+    <form id="loginForm" class="card login-card" autocomplete="off">
+      <h1>wg-easy 运维</h1>
+      <p class="muted" id="loginHost"></p>
+      <label>运维口令
+        <input type="password" id="pw" autocomplete="current-password" required>
+      </label>
+      <button type="submit" class="primary">登录</button>
+      <p class="err" id="loginErr"></p>
+      <p class="muted small">口令在服务器 .env 的 OPS_UI_PASSWORD；连续 5 次错误锁定 15 分钟。</p>
+    </form>
+  </section>
+
+  <!-- 主界面 -->
+  <section id="app" class="hidden">
+    <header class="top">
+      <div class="brand">wg-easy 运维 <span class="muted" id="hostLabel"></span></div>
+      <nav class="tabs" id="tabs">
+        <button data-tab="stats" class="active">访问统计</button>
+        <button data-tab="bans">封禁列表</button>
+        <button data-tab="live">实时请求</button>
+        <button data-tab="diag">连通性诊断</button>
+      </nav>
+      <button id="logout" class="ghost">退出</button>
+    </header>
+
+    <main>
+      <!-- 访问统计 -->
+      <div class="tab" id="tab-stats">
+        <form id="statsForm" class="toolbar">
+          <label>时间范围
+            <select id="fSince">
+              <option value="1h">最近 1 小时</option>
+              <option value="6h">最近 6 小时</option>
+              <option value="24h" selected>最近 24 小时</option>
+              <option value="7d">最近 7 天</option>
+              <option value="">全部</option>
+            </select>
+          </label>
+          <label>来源 IP <input id="fIp" placeholder="可选" size="16"></label>
+          <label>状态码 <input id="fStatus" placeholder="如 403" size="5"></label>
+          <label>路径包含 <input id="fQ" placeholder="如 .php" size="12"></label>
+          <label>Top <input id="fTop" type="number" min="1" max="100" value="10" class="num"></label>
+          <label class="check"><input type="checkbox" id="fRotated"> 含轮转日志</label>
+          <button type="submit" class="primary">刷新</button>
+          <button type="button" id="statsReset" class="ghost">清空筛选</button>
+          <span class="muted small" id="statsMeta"></span>
+        </form>
+        <p class="err" id="statsErr"></p>
+        <div id="statsBody"></div>
+      </div>
+
+      <!-- 封禁列表 -->
+      <div class="tab hidden" id="tab-bans">
+        <form id="bansForm" class="toolbar">
+          <label>查 IP <input id="bIp" placeholder="留空=全部" size="18"></label>
+          <label class="check"><input type="checkbox" id="bCommunity"> 含社区黑名单（CAPI，可能上万条）</label>
+          <button type="submit" class="primary">刷新</button>
+          <span class="muted small" id="bansMeta"></span>
+        </form>
+        <p class="err" id="bansErr"></p>
+        <div id="bansBody"></div>
+      </div>
+
+      <!-- 实时请求 -->
+      <div class="tab hidden" id="tab-live">
+        <form id="liveForm" class="toolbar">
+          <label>只看 IP <input id="lIp" placeholder="留空=全部" size="18"></label>
+          <label class="check"><input type="checkbox" id="lHide308"> 隐藏 308</label>
+          <label class="check"><input type="checkbox" id="lOnlyBad"> 只看异常（403/429/0/5xx）</label>
+          <button type="submit" class="primary" id="liveToggle">开始</button>
+          <button type="button" id="liveClear" class="ghost">清屏</button>
+          <span class="pill" id="liveState">未连接</span>
+        </form>
+        <p class="muted small">打开后在客户端点“立即同步配置”，这里会实时出现对应请求。308 是明文跳 HTTPS，紧跟着同路径那条才是结果。</p>
+        <div class="tablewrap live">
+          <table>
+            <thead><tr><th>时间</th><th>来源 IP</th><th>方法</th><th>状态</th><th>路径</th><th>耗时</th><th>说明</th><th>客户端</th></tr></thead>
+            <tbody id="liveBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 连通性诊断 -->
+      <div class="tab hidden" id="tab-diag">
+        <form id="diagForm" class="toolbar">
+          <label>检查路径 <input id="dPath" value="/api/livewireguard/config" size="32"></label>
+          <button type="submit" class="primary" id="diagRun">开始诊断</button>
+          <span class="muted small" id="diagMeta"></span>
+        </form>
+        <p class="muted small">从 ops-ui 容器内逐层检查：配置 → wg-easy 直连 → 经过 Caddy → 证书 → CrowdSec → 访问日志 → DNS → OIDC。需要宿主机 root 的检查只给出命令。</p>
+        <p class="err" id="diagErr"></p>
+        <div id="diagBody"></div>
+      </div>
+    </main>
+  </section>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

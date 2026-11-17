@@ -54,6 +54,8 @@ PAIRS=(
   "${SRC}crowdsecurity/crowdsec:${CROWDSEC_VERSION}|${NS}/crowdsec:${CROWDSEC_VERSION}"
   "${SRC}library/caddy:${CADDY_VERSION}-builder-alpine|${NS}/caddy:${CADDY_VERSION}-builder-alpine"
   "${SRC}library/caddy:${CADDY_VERSION}-alpine|${NS}/caddy:${CADDY_VERSION}-alpine"
+  # 运维页面 ops-ui 的基础镜像（可选服务；不用 ops-ui 也可以同步，体积很小）
+  "${SRC}library/node:22-alpine|${NS}/node:22-alpine"
 )
 
 echo "源      : ${SRC:-Docker Hub}"
@@ -98,12 +100,13 @@ echo
 if [ ${#failed[@]} -gt 0 ]; then
   printf '✘ 以下镜像同步失败：\n'; printf '    %s\n' "${failed[@]}"
   echo "  拉取失败：本机也连不上 Docker Hub，换一台机器，或设置 MIRROR_SOURCE"
-  echo "  推送失败：先 docker login $REGISTRY（用户名是腾讯云账号 ID）；提示仓库不存在时，在容器镜像服务控制台创建 crowdsec 和 caddy 两个仓库"
+  echo "  推送失败：先 docker login $REGISTRY（用户名是腾讯云账号 ID）；提示仓库不存在时，在容器镜像服务控制台创建 crowdsec、caddy（以及 node）仓库"
   exit 1
 fi
 
 echo "✔ 同步完成。在服务器的 .env 中设置："
 echo "    CROWDSEC_IMAGE=$NS/crowdsec:$CROWDSEC_VERSION"
 echo "    CADDY_BASE_REGISTRY=$NS/"
+echo "    OPS_UI_BASE_REGISTRY=$NS/      # 启用运维页面 ops-ui 时"
 echo "然后执行："
 echo "    docker compose -f docker-compose-dirty.yml up -d"

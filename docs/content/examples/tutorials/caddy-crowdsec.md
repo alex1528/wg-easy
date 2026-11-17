@@ -12,7 +12,9 @@ title: Caddy HTTPS + 限流 + CrowdSec
 
 - Web UI 仍然使用 `51821/tcp`，但改为 HTTPS，证书自动申请和续期；在同一端口用 `http://` 访问会自动跳转到 `https://`
 - 按 IP 限流登录、2FA、Basic 认证、一次性配置链接和普通 API
-- CrowdSec 分析 Caddy 访问日志和 wg-easy 自己的安全日志，发现爆破后由 Caddy 直接拦截该 IP（默认 4 小时，2FA 爆破 24 小时，同一 IP 再犯时递增），可选推送到企业微信、钉钉或 Telegram
+- CrowdSec 分析 Caddy 访问日志和 wg-easy 自己的安全日志，发现爆破 / 扫描后由 Caddy 直接拦截该 IP（默认 4 小时，2FA 爆破 24 小时，同一 IP 再犯时递增），可选推送到企业微信、钉钉或 Telegram
+- `scripts/log-stats.sh` 把 Caddy 访问日志汇总成状态码分布、扫描探测识别、来源 / 路径排行和时间趋势，并支持 `--json` 接监控；`diagnose-public.sh --stats` 是同一份统计的入口
+- 可选的运维页面 `ops-ui`（`https://<WG_WEB_HOST>:51821/ops/`）：在浏览器里看访问统计、CrowdSec 封禁列表、实时请求和连通性诊断，不用手动组合命令，见[运维页面（Web UI）](#运维页面web-ui)
 
 ## 架构
 
@@ -32,7 +34,8 @@ Caddy 处理每个请求的顺序：
 2. 管理后台只允许管理员 IP（与 CrowdSec 管理员白名单是同一份名单）；同步配置接口、客户端的 OIDC 登录和 `/cnf/*` 一次性链接对所有 IP 开放；`WG_ADMIN_GATE=off` 时跳过这一步
 3. `/metrics/*` 只允许内网 IP
 4. 限流，超出返回 429
-5. 压缩后转发给 wg-easy
+5. `/ops/*` 转给运维页面 ops-ui（可选，未启用时返回 502）
+6. 压缩后转发给 wg-easy
 
 ### 端口
 
@@ -43,7 +46,7 @@ Caddy 处理每个请求的顺序：
 | `80/tcp`             | caddy    | 只有 `http` 证书模式需要，其他模式可以删掉这一行   |
 | `127.0.0.1:5140/udp` | crowdsec | 只在本机监听，接收 wg-easy 日志，外网访问不到      |
 
-CrowdSec 的本地 API（8080）不对外发布，只有 Caddy 能通过内部网络访问。
+CrowdSec 的本地 API（8080）不对外发布，只有 Caddy（以及启用后的 ops-ui）能通过内部网络访问。运维页面 ops-ui 不占用新端口，经 Caddy 的 `51821/tcp` 下的 `/ops/` 访问。
 
 ## 前置条件
 
@@ -374,7 +377,7 @@ docker exec wg-easy-crowdsec cscli bouncers list
 # 两条日志都在读：caddy/logs/access.log 和 syslog 的行数都在增长
 docker exec wg-easy-crowdsec cscli metrics
 
-# 本项目的 5 条规则和 1 个解析器都已加载
+# 本项目的 6 条规则和 1 个解析器都已加载
 docker exec wg-easy-crowdsec cscli scenarios list | grep wg-easy
 docker exec wg-easy-crowdsec cscli parsers list | grep wg-easy
 ```
@@ -422,10 +425,24 @@ docker exec wg-easy-crowdsec cscli alerts delete --ip <测试IP>
 | `wg-easy/cnf-enum`         | `/cnf/*` 返回 404（链接无效或已被使用）                     | 同一 IP 超过 5 次（每分钟抵消 1 次）     |
 | `wg-easy/rate-limit-abuse` | 收到 Caddy 返回的 429                                       | 同一 IP 超过 20 次（每 30 秒抵消 1 次）  |
 | `wg-easy/2fa-bf`           | wg-easy 日志 `Security failure: type=2fa`（验证码错误）     | 同一 IP 超过 5 次（每 2 分钟抵消 1 次）  |
+| `wg-easy/probe-scan`       | 多个**不同**的 WordPress / PHP 后门 / 管理入口路径返回 403/404/400 | 同一 IP 5 个不同路径（每 10 分钟抵消 1 个） |
 
-另外还会启用 CrowdSec 官方的 `crowdsecurity/caddy` 规则集（目录扫描、已知漏洞探测等）。
+另外还会启用 CrowdSec 官方的 `crowdsecurity/caddy` 规则集（目录扫描、已知漏洞探测等），以及官方 `crowdsecurity/http-probing`（通用 403/404 探测）。`wg-easy/probe-scan` 与官方规则互补：这套服务是 Node 程序、没有任何 PHP / WordPress 内容，命中 `*.php`、`/wp-*`、`/wp-content/`、`.env` 等路径一定是扫描器，因此门槛更低、且用 `distinct` 只数不同的路径（同一路径反复请求不重复计数）。明文 HTTP 的 308 跳转不计入这条规则（filter 只认 403/404/400），所以一次探测只算一次，不会因为“308+403 两条日志”翻倍。
 
 wg-easy 在 2FA 验证码错误时返回 HTTP 200，访问日志看不出来，所以 `2fa-bf` 改为读取 wg-easy 自己的日志。日志通过 Docker 的 syslog 日志驱动发给 CrowdSec，不需要挂载 `docker.sock`。解析器只取每行最后一个 `ip=`，用户名里写入的 `ip=...` 不会被当作来源 IP，攻击者无法借此让别人被封。
+
+/// note | 一次扫描为什么有两条日志
+
+公网扫描器先发明文 HTTP(`:80`) 请求，被 Caddy 在同端口 `308` 跳到 `https://<域名>:51821`，紧接着同一路径的 HTTPS 请求再被 Caddy 拦成 `403`。所以日志里成对出现：
+
+```
+308  GET /wp-admin/maint/                 host=vpn.example.com        → Location: https://...:51821/wp-admin/maint/
+403  GET /wp-admin/maint/                 host=vpn.example.com:51821   → security_headers，无 X-Wg-Gate 头
+```
+
+`403` 没有 `X-Wg-Gate: admin-only` 头，说明不是管理员 IP 规则拦的，多半是该 IP 已被 CrowdSec 封禁、或路径不在 `WG_PUBLIC_PATHS` 里——**防护正在生效**，一般无需处理。统计次数时不要把 308 和 403 当成两次攻击，见下文“访问日志统计”。
+
+///
 
 /// danger | 2FA 规则被触发
 
@@ -451,7 +468,7 @@ wg-easy 在 2FA 验证码错误时返回 HTTP 200，访问日志看不出来，�
 
 可选。CrowdSec 封禁 IP 时推送一条消息到企业微信、钉钉或 Telegram 群。
 
-- 只推送 wg-easy 专用规则（上表 5 条）的封禁；官方规则（扫描、漏洞探测）照常封禁但不推送，避免刷屏
+- 只推送 wg-easy 专用规则（上表 6 条）的封禁；官方规则（扫描、漏洞探测）照常封禁但不推送，避免刷屏
 - 30 秒内的多次封禁合并成一条消息，一条最多列 8 个 IP
 - `wg-easy/2fa-bf` 标为高危，消息里提示修改密码，并 @所有人（Telegram 不支持 @所有人）
 - 社区黑名单下发的封禁不经过本地规则，不会推送
@@ -510,6 +527,8 @@ docker exec wg-easy-crowdsec cscli notifications reinject <告警ID>
 
 ```shell
 tail -f caddy/logs/access.log                       # Caddy 访问日志（JSON）
+bash scripts/log-stats.sh                           # 汇总统计：状态码分布 / 扫描探测 / 来源与路径排行 / 时间趋势
+bash scripts/log-stats.sh --json                    # 输出 JSON，接监控或定时任务
 docker logs -f wg-easy                              # wg-easy 日志
 docker logs -f wg-easy-caddy                        # Caddy 运行日志（证书申请等）
 docker exec wg-easy-crowdsec cscli alerts list      # 告警记录
@@ -517,6 +536,58 @@ docker exec wg-easy-crowdsec cscli decisions list   # 当前封禁
 docker exec wg-easy-crowdsec cscli decisions delete --ip <IP>   # 解封
 docker exec wg-easy-crowdsec cscli alerts delete --ip <IP>      # 解封并清零递增计数
 ```
+
+### 访问日志统计
+
+`scripts/log-stats.sh`（也可用 `bash scripts/diagnose-public.sh --stats` 调用）把 Caddy 的 JSON 访问日志汇总成一份运维报告，用来回答“谁在扫、扫了什么、有没有拦住”：
+
+```shell
+bash scripts/log-stats.sh                          # 完整报告
+bash scripts/log-stats.sh --scanners               # 附“可疑来源汇总”：有扫描特征或撞到 403/429 的 IP
+bash scripts/log-stats.sh --since 2h               # 只看最近 2 小时（也支持 30m / 7d / 2026-11-16）
+bash scripts/log-stats.sh --ip 203.0.113.9        # 只看某个来源 IP
+bash scripts/log-stats.sh --status 403             # 只看某个状态码
+bash scripts/log-stats.sh --top 20                 # 各榜单显示前 20 条（默认 10）
+bash scripts/log-stats.sh --json                   # 机器可读，字段见脚本头部注释
+bash scripts/log-stats.sh --log /path/access.log   # 分析指定日志（含轮转后的旧文件）
+bash scripts/log-stats.sh --selftest               # 用内置样本自测，不依赖服务器日志
+```
+
+报告分五部分：① 状态码分布（并区分 403 是管理员 IP 规则还是 CrowdSec 封禁）；② **308 跳转与 403 拦截的配对**——一次扫描产生两条日志，脚本会提示不要把请求数翻倍；③ 扫描 / 漏洞探测识别（WordPress、PHP 文件、管理入口、敏感文件等特征，以及被扫最多的路径和来源 IP）；④ 来源 IP / 路径 / Host / 方法 Top N；⑤ 按小时的请求与扫描趋势。`--json` 输出同样的指标，便于用定时任务采集。脚本只读日志、不依赖 `jq` 或 `docker`，用 `awk` 宽松匹配各字段，解析不了的行会单独计数而不是静默丢弃。
+
+`diagnose-public.sh` 的默认检查流程新增了第 9 步“公网扫描 / 漏洞探测噪声”，会列出最近命中扫描特征、且已被记录结果的请求，并提示 308 跳转另计；它和 `--watch` / `--ip` 的分工是：后者看单个 IP 的逐条请求（排障），`log-stats.sh` 看全量分布（运营统计）。
+
+### 运维页面（Web UI）
+
+不想记命令组合时，可以启用可选的 `ops-ui` 容器（源码在 `ops-ui/`，只用 Node 内置模块，没有第三方依赖），在浏览器里完成上面这些操作：
+
+- **访问统计**：`log-stats.sh` 的全部内容（状态码、308 / 403 配对、扫描识别、来源 / 路径排行、按小时趋势、可疑来源），可按时间范围、IP、状态码、路径筛选，可选包含轮转后的 `.gz` 日志；点 IP 即按该 IP 筛选
+- **封禁列表**：只读查询 CrowdSec 当前生效的封禁（触发规则、来源、剩余时长、到期时间）。默认只列本机规则和 `cscli` 手动封禁，可勾选包含社区黑名单；解封提供可复制的 `cscli decisions delete` 命令
+- **实时请求**：相当于 `diagnose-public.sh --watch`，可按 IP 过滤、隐藏 308、只看异常，每条请求附一句状态说明
+- **连通性诊断**：从容器内逐层检查管理员 IP 开关与公开路径、wg-easy 直连、经过 Caddy、HTTPS 证书、CrowdSec 本地 API、访问日志是否在写、DNS（A / AAAA、不同 DNS 是否不一致）和 OIDC 发现地址；需要宿主机 root 的检查（`--lines` / `--trace` / `--capture`）给出可复制的命令
+
+启用：
+
+```shell
+# 1. .env 中取消 COMPOSE_PROFILES=ops 那一行的注释，并填写 OPS_UI_PASSWORD（建议 openssl rand -base64 18 生成）
+# 2. 构建并启动 ops-ui，再重建 caddy 加载 /ops 路由
+docker compose -f docker-compose-dirty.yml up -d --build ops-ui
+docker compose -f docker-compose-dirty.yml up -d --no-build --force-recreate caddy
+# 3. 浏览器打开 https://<WG_WEB_HOST>:51821/ops/
+```
+
+连不上 Docker Hub 时先用 `scripts/mirror-images.sh` 同步 `node:22-alpine`，再在 `.env` 设置 `OPS_UI_BASE_REGISTRY`（如 `ccr.ccs.tencentyun.com/vpn-server/`，末尾带 `/`）。
+
+安全设计：
+
+- 经 Caddy 反代，不单独发布端口：同样受 CrowdSec 封禁和 HTTPS 保护；`WG_ADMIN_GATE=on` 时只有管理员 IP 能打开（不要把 `/ops` 加进 `WG_PUBLIC_PATHS`）
+- 自带口令登录，同一 IP 连续 5 次错误锁定 15 分钟；登录接口和 wg-easy 登录一样受 Caddy 的登录限流
+- 会话 Cookie 为 HttpOnly、SameSite=Strict、Secure，写操作要求同源 JSON 请求；页面有严格的 CSP（不允许内联脚本）
+- 只读挂载 `caddy/logs`，不挂载 `docker.sock`，不能改任何配置
+- 封禁列表用 bouncer 接口的无状态查询（`GET /v1/decisions`），不碰 Caddy 用的增量拉取接口；`OPS_UI_BOUNCER_KEY` 留空时复用 `CROWDSEC_BOUNCER_KEY`，想单独一把用 `docker exec wg-easy-crowdsec cscli bouncers add ops-ui` 生成
+- 不设 `OPS_UI_SECRET` 时每次重启 ops-ui 都需要重新登录；改口令后旧会话自动失效
+
+不启用 ops-ui 时（`COMPOSE_PROFILES` 不含 `ops`）其他服务完全不受影响，访问 `/ops` 只会得到 502。
 
 ### 管理员 IP 白名单
 
@@ -543,6 +614,8 @@ docker restart wg-easy-crowdsec wg-easy-caddy  # 3. 两边同时生效
 bash scripts/diagnose-public.sh                     # 默认检查 /api/livewireguard/config
 bash scripts/diagnose-public.sh /api/auth/oidc/callback
 bash scripts/diagnose-public.sh --ip <客户端公网IP>    # 这个 IP 最近的全部请求
+bash scripts/diagnose-public.sh --stats               # 全量统计（等同 bash scripts/log-stats.sh）
+bash scripts/diagnose-public.sh --stats --since 2h    # 统计开关可透传
 bash scripts/diagnose-public.sh --watch               # 实时观察：启动时先发一个自检请求，看到自检记录后再去客户端点同步
 bash scripts/diagnose-public.sh --watch <客户端公网IP> # 只看这个 IP 的请求
 sudo bash scripts/diagnose-public.sh --capture        # 抓发往 51821 的新 TCP 连接，和 --watch 对照
@@ -553,12 +626,13 @@ sudo bash scripts/diagnose-public.sh --lines           # 双线服务器：检�
 sudo bash scripts/diagnose-public.sh --trace 60        # 60 秒内在 4G 上测试，逐层计数定位丢包位置
 ```
 
-脚本依次检查：容器里的 Caddyfile 和管理员名单是不是新版、路径是否在 `WG_PUBLIC_PATHS` 里、wg-easy 自己对这个路径返回什么、经过 Caddy 返回什么、访问日志和 CrowdSec 封禁，最后列出最近被管理员 IP 规则拦下的路径（客户端需要但没有开放的路径就在这里），并检查 OIDC 服务能否访问。客户端同步超时，而 `--watch` 里没有出现任何请求，说明请求根本没到这台服务器：检查客户端填的服务器地址、上游防火墙或安全组，以及客户端所在网络能否访问 OIDC 服务（第 8 步给出了测试命令）。经过 Caddy 的结果这样看：
+脚本依次检查：容器里的 Caddyfile 和管理员名单是不是新版、路径是否在 `WG_PUBLIC_PATHS` 里、wg-easy 自己对这个路径返回什么、经过 Caddy 返回什么、访问日志和 CrowdSec 封禁，列出最近被管理员 IP 规则拦下的路径（客户端需要但没有开放的路径就在这里），再检查 OIDC 服务能否访问，最后（第 9 步）汇总最近的公网扫描 / 漏洞探测噪声。客户端同步超时，而 `--watch` 里没有出现任何请求，说明请求根本没到这台服务器：检查客户端填的服务器地址、上游防火墙或安全组，以及客户端所在网络能否访问 OIDC 服务（第 8 步给出了测试命令）。经过 Caddy 的结果这样看：
 
 | 结果                            | 含义                                                     |
 | ------------------------------- | -------------------------------------------------------- |
+| 308                             | 明文 HTTP 自动跳 HTTPS，紧跟着同一路径的另一条日志才是结果（见“一次扫描为什么有两条日志”） |
 | 403，带 `X-Wg-Gate: admin-only` | 被管理员 IP 判断拦下：路径不在 `WG_PUBLIC_PATHS` 里       |
-| 403，没有 `X-Wg-Gate`           | 来源 IP 被 CrowdSec 封禁                                 |
+| 403，没有 `X-Wg-Gate`           | 来源 IP 被 CrowdSec 封禁，或访问了不公开路径（如 `/wp-admin`、`*.php` 扫描） |
 | 429                             | 触发限流                                                 |
 | 502                             | Caddy 连不上 wg-easy                                     |
 | 没有响应（连接被断开）          | 容器里还是旧版 Caddyfile，需要 `--force-recreate` 重建   |
@@ -661,6 +735,7 @@ bash scripts/sync-upstream.sh --continue  # 手工处理完冲突或检查问题
 | Caddy 启动报 `permission denied`                             | 容器去掉了越权写文件的权限，执行 `sudo chown -R root:root caddy/data caddy/config caddy/logs`                                              |
 | 登录不了或频繁返回 429                                       | 多个用户共用一个出口 IP（如公司网络），适当调大 `RL_LOGIN_PER_MIN`，或把该 IP 加入 CrowdSec 白名单                                         |
 | 访问日志里 `client_ip` 全是 Docker 网关地址                  | 见“第 4 步：验证”中的真实 IP 检查，IPv6 需要开启 `ip6tables`                                                                                          |
+| 访问日志里大量 `308` 紧跟同一路径 `403`，路径是 `/wp-admin/`、`/wp-content/.../*.php`、`/myy.php`、`*.php` 等 | 公网 WordPress / PHP 漏洞扫描，已被 Caddy 挡在 wg-easy 之前。一次探测=308(跳 HTTPS)+403(拦下)两条日志，别当成两次攻击；用 `bash scripts/log-stats.sh --scanners` 看规模和来源，`403` 没有 `X-Wg-Gate` 头多半是已被 CrowdSec 封禁，一般无需处理。同一 IP 出现 ≥5 个不同探测路径会触发 `wg-easy/probe-scan` 自动封禁（样本里 3 个还不够） |
 | `cscli bouncers list` 中 caddy 没有拉取记录                  | 两边密钥不一致，按“更换 CrowdSec 通信密钥”一节重新注册                                                                            |
 | `cscli metrics` 中 syslog 行数为 0                           | 检查 Docker 版本（需 20.10+），以及 `docker inspect wg-easy --format '{{.HostConfig.LogConfig}}'` 是否为 syslog 驱动                       |
 | 自己被封了                                                   | 在服务器上执行 `cscli alerts delete --ip <IP>`（解封并清零递增计数），并把自己的 IP 加入 CrowdSec 白名单                                                      |

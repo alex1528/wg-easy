@@ -1,0 +1,14 @@
+{
+  "name": "wg-easy-ops-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "wg-easy 运维页面：访问日志统计、CrowdSec 封禁列表、实时请求、连通性诊断（零第三方依赖）",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs"
+  }
+}

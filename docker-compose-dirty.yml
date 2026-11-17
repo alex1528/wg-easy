@@ -195,6 +195,52 @@ services:
         ipv4_address: 10.42.42.44
         ipv6_address: fdcc:ad94:bacf:61a3::2c
 
+  # 运维页面（可选）：访问日志统计、CrowdSec 封禁列表、实时请求、连通性诊断，见 ops-ui/
+  # 启用：.env 设 COMPOSE_PROFILES=ops 和 OPS_UI_PASSWORD，然后
+  #   docker compose -f docker-compose-dirty.yml up -d --build ops-ui
+  # 访问：https://<WG_WEB_HOST>:51821/ops/ —— 经 Caddy 反代，同样受管理员 IP 开关、CrowdSec 封禁和 HTTPS 保护，
+  #   不单独发布端口，也不挂载 docker.sock；封禁列表只读，解封仍用 cscli
+  ops-ui:
+    profiles: ["ops"]
+    build:
+      context: ./ops-ui
+      args:
+        NODE_BASE_REGISTRY: ${OPS_UI_BASE_REGISTRY:-}
+    image: ${OPS_UI_IMAGE:-wg-easy-ops-ui:local}
+    container_name: wg-easy-ops-ui
+    restart: unless-stopped
+    read_only: true
+    # 用 root 但去掉全部 capability：Caddy 写的访问日志属主 root、权限 0600，普通用户读不到
+    user: "0:0"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    environment:
+      TZ: Asia/Shanghai
+      # 登录口令（必填，否则页面无法登录）；会话签名密钥留空则每次重启需重新登录
+      OPS_UI_PASSWORD: ${OPS_UI_PASSWORD:-}
+      OPS_UI_SECRET: ${OPS_UI_SECRET:-}
+      # 查询封禁用的 bouncer key：留空则复用 caddy 的 CROWDSEC_BOUNCER_KEY（只用无状态查询，不影响 caddy 拉取）
+      OPS_UI_BOUNCER_KEY: ${OPS_UI_BOUNCER_KEY:-}
+      CROWDSEC_BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:-}
+      CROWDSEC_LAPI_URL: http://crowdsec:8080
+      # 以下只用于诊断页，与 caddy 用同一份 .env
+      WG_WEB_HOST: ${WG_WEB_HOST:-}
+      WG_ADMIN_GATE: ${WG_ADMIN_GATE:-on}
+      WG_PUBLIC_PATHS: ${WG_PUBLIC_PATHS:-/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*}
+      OAUTH_OIDC_SERVER: ${OAUTH_OIDC_SERVER:-}
+      CADDY_DNS_RESOLVERS: ${CADDY_DNS_RESOLVERS:-119.29.29.29 223.5.5.5}
+    volumes:
+      # 只读：统计、实时请求都只读访问日志（含轮转的 .gz）
+      - ./caddy/logs:/var/log/caddy:ro
+    networks:
+      wg:
+        ipv4_address: 10.42.42.45
+        ipv6_address: fdcc:ad94:bacf:61a3::2d
+
 volumes:
   crowdsec_config:
   crowdsec_data:

@@ -1,11 +1,13 @@
 # wg-easy 专用检测场景
-#   场景 1-4：基于 Caddy 访问日志（acquis.d/caddy.yaml）
-#   场景 5  ：基于 wg-easy 自己的安全日志（acquis.d/wg-easy-syslog.yaml + parsers/s01-parse/wg-easy-security.yaml）
+#   场景 1-4、6：基于 Caddy 访问日志（acquis.d/caddy.yaml）
+#   场景 5      ：基于 wg-easy 自己的安全日志（acquis.d/wg-easy-syslog.yaml + parsers/s01-parse/wg-easy-security.yaml）
 # 漏桶算法：同一 IP 的事件进桶，每过 leakspeed 漏掉一个；桶里超过 capacity 个就触发封禁
 # 默认封禁时长 4 小时（CrowdSec 默认 profiles.yaml）
 #
 # 说明：wg-easy 的 2FA 验证码错误返回 HTTP 200（body 里是 INVALID_TOTP_CODE），
 # Caddy 访问日志里看不出来，所以 2FA 爆破改用 wg-easy 自己打印的 "Security failure: type=2fa" 日志检测（场景 5）。
+# 场景 6 针对公网 WordPress / PHP 漏洞扫描：这套服务没有 PHP/WordPress，命中这些路径必然是探测；
+#   明文 HTTP 自动跳转(308)不计入（filter 只认 403/404/400），所以一次探测只算一条，不会翻倍。
 
 # 1. 密码爆破：POST /api/auth/password 返回 401（用户名或密码错误 / 用户被禁用）
 #    Caddy 限流每分钟最多放过 5 次，桶净增约 4 个/分钟，持续爆破约 3 分钟后被封
@@ -122,6 +124,63 @@ labels:
   label: "wg-easy 2FA 验证码爆破"
   classification:
     - attack.T1110
+  confidence: 3
+  spoofable: 0
+  remediation: true
+---
+# 6. 公网漏洞扫描 / 探测：同一 IP 连续请求多个不同的 WordPress / PHP 后门 / 管理入口路径并被 403/404/400 拦下
+#    这套服务是 wg-easy（Node），没有任何 PHP / WordPress 内容，命中这些路径一定是扫描器，
+#    所以门槛可以比官方 crowdsecurity/http-probing 低，且用 distinct 只数“不同路径”。
+#    典型日志（同一次访问两条，308 是跳 HTTPS 的前奏，不计入本规则）：
+#      GET /wp-admin/maint/                         → 308 → 403
+#      GET /wp/wp-content/plugins/.../geido.php    → 308 → 403
+#      GET /myy.php                                → 308 → 403
+#    filter 只用 startsWith / contains / endsWith 这些确定的 expr 运算符（不用正则和 Match 通配符，
+#    避免 / 与转义在不同 CrowdSec 版本里的差异）；Lower() 统一大小写，改大小写也照样命中。
+#    扩展名判断用 endsWith('.php') 之类，能匹配任意层级的 /a/b/c/geido.php。
+#    distinct: evt.Meta.http_path 保证同一个路径反复请求只算一次，
+#    5 个不同探测路径（每 10 分钟消减 1 个）即封；官方 http-probing 仍照常生效，二者互补。
+#    注意：distinct 只数不同路径，样本里 3 个路径还达不到 5，需继续出现别的探测路径才触发。
+type: leaky
+name: wg-easy/probe-scan
+description: "wg-easy 公网 WordPress/PHP 漏洞扫描（多个不同探测路径）"
+filter: |
+  evt.Meta.log_type == 'http_access-log' &&
+  evt.Meta.http_status in ['403', '404', '400'] &&
+  (
+    Lower(evt.Meta.http_path) startsWith '/wp-' ||
+    Lower(evt.Meta.http_path) startsWith '/wp/' ||
+    Lower(evt.Meta.http_path) startsWith '/wordpress/' ||
+    Lower(evt.Meta.http_path) startsWith '/administrator/' ||
+    Lower(evt.Meta.http_path) startsWith '/phpmyadmin/' ||
+    Lower(evt.Meta.http_path) contains '/wp-content/' ||
+    Lower(evt.Meta.http_path) contains '/wp-includes/' ||
+    Lower(evt.Meta.http_path) contains '/xmlrpc.php' ||
+    Lower(evt.Meta.http_path) contains '/wp-login.php' ||
+    Lower(evt.Meta.http_path) contains '/phpmyadmin/' ||
+    Lower(evt.Meta.http_path) contains '/administrator/' ||
+    Lower(evt.Meta.http_path) contains '/actuator/' ||
+    Lower(evt.Meta.http_path) contains '/solr/' ||
+    Lower(evt.Meta.http_path) contains '/jenkins/' ||
+    Lower(evt.Meta.http_path) contains '/cgi-bin/' ||
+    Lower(evt.Meta.http_path) contains '/.git/' ||
+    Lower(evt.Meta.http_path) endsWith '.php' ||
+    Lower(evt.Meta.http_path) endsWith '.phtml' ||
+    Lower(evt.Meta.http_path) endsWith '.phps' ||
+    Lower(evt.Meta.http_path) endsWith '.env' ||
+    Lower(evt.Meta.http_path) endsWith '/.env'
+  )
+groupby: evt.Meta.source_ip
+distinct: evt.Meta.http_path
+capacity: 5
+leakspeed: 10m
+blackhole: 30m
+labels:
+  service: wg-easy
+  behavior: "http:scan"
+  label: "wg-easy 公网漏洞扫描（WordPress/PHP 探测）"
+  classification:
+    - attack.T1595
   confidence: 3
   spoofable: 0
   remediation: true
