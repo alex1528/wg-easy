@@ -5,10 +5,10 @@
 #   bash scripts/caddy-image.sh                    # 构建 + 自检 + 推送（本机架构）
 #   bash scripts/caddy-image.sh --no-push          # 只构建 + 自检，不推送
 #   bash scripts/caddy-image.sh --platform linux/amd64,linux/arm64   # 多架构推送（需 buildx）
-#   bash scripts/caddy-image.sh --no-latest        # 不更新 latest 标签
+#   bash scripts/caddy-image.sh --no-latest        # 不更新浮动标签 ratelimit-dns（compose 默认用它）
 #
 # 配置（优先级：当前环境变量 > .env > 默认值）：
-#   CADDY_IMAGE_REPO  推送目标，默认 ccr.ccs.tencentyun.com/vpn-server/caddy-ratelimit-dns
+#   CADDY_IMAGE_REPO  推送目标，默认 ccr.ccs.tencentyun.com/vpn-server/caddy（标签 ratelimit-dns、ratelimit-dns-<版本>[-<日期>-<提交号>]）
 #   CADDY_VERSION     Caddy 主版本或固定小版本，默认 2（插件不兼容时改成 2.9 之类）
 #   GOPROXY           Go 模块代理，默认 https://goproxy.cn,direct
 #   CADDY_BASE_REGISTRY  基础镜像前缀，默认空（Docker Hub）；连不上时见 scripts/mirror-images.sh
@@ -45,7 +45,7 @@ env_get() {
 }
 
 REPO="${CADDY_IMAGE_REPO:-$(env_get CADDY_IMAGE_REPO)}"
-REPO="${REPO:-ccr.ccs.tencentyun.com/vpn-server/caddy-ratelimit-dns}"
+REPO="${REPO:-ccr.ccs.tencentyun.com/vpn-server/caddy}"
 CADDY_VERSION="${CADDY_VERSION:-$(env_get CADDY_VERSION)}"
 CADDY_VERSION="${CADDY_VERSION:-2}"
 GOPROXY="${GOPROXY:-$(env_get GOPROXY)}"
@@ -55,7 +55,6 @@ CADDY_BASE_REGISTRY="${CADDY_BASE_REGISTRY:-$(env_get CADDY_BASE_REGISTRY)}"
 if [ -n "$CADDY_BASE_REGISTRY" ]; then CADDY_BASE_REGISTRY="${CADDY_BASE_REGISTRY%/}/"; fi
 REGISTRY="${REPO%%/*}"
 BUILD_TAG="wg-easy-caddy:build-$$"
-LOCAL_ALIAS="wg-easy-caddy:ratelimit-dns"   # compose 默认使用的本地标签
 REQUIRED_MODULES="http.handlers.rate_limit dns.providers.tencentcloud dns.providers.alidns crowdsec http.handlers.crowdsec"
 
 # ---------- 环境检查 ----------
@@ -166,17 +165,20 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
 else
   REV="nogit"
 fi
-TAGS=("$CADDY_VER" "${CADDY_VER}-${DATE}-${REV}")
-if [ "$LATEST" = 1 ]; then TAGS+=("latest"); fi
+# 和同一仓库里 mirror-images.sh 同步的 caddy:2-alpine 等基础镜像区分开，统一加 ratelimit-dns 前缀
+TAGS=("ratelimit-dns-${CADDY_VER}" "ratelimit-dns-${CADDY_VER}-${DATE}-${REV}")
+# ratelimit-dns 是 compose 的默认标签（浮动，指向最近一次构建）
+if [ "$LATEST" = 1 ]; then TAGS+=("ratelimit-dns"); fi
+FIXED="$REPO:ratelimit-dns-${CADDY_VER}-${DATE}-${REV}"
 
-docker tag "$BUILD_TAG" "$LOCAL_ALIAS"
 for t in "${TAGS[@]}"; do docker tag "$BUILD_TAG" "$REPO:$t"; done
 
 if [ "$PUSH" = 0 ]; then
   echo
   echo "✔ 构建和自检完成，未推送。本地标签："
-  echo "    $LOCAL_ALIAS"
   for t in "${TAGS[@]}"; do echo "    $REPO:$t"; done
+  echo "本机直接使用（镜像已在本机，up 不会去拉；不要先执行 pull）：.env 设 CADDY_IMAGE=$FIXED，然后"
+  echo "    docker compose -f docker-compose-dirty.yml up -d caddy"
   exit 0
 fi
 
@@ -221,7 +223,7 @@ for t in "${TAGS[@]}"; do echo "    $REPO:$t"; done
 [ -z "$DIGEST" ] || echo "    digest: $DIGEST"
 echo
 echo "服务器上使用：在 .env 中设置"
-echo "    CADDY_IMAGE=$REPO:${CADDY_VER}-${DATE}-${REV}"
+echo "    CADDY_IMAGE=$FIXED"
 echo "然后执行："
 echo "    docker compose -f docker-compose-dirty.yml pull caddy"
-echo "    docker compose -f docker-compose-dirty.yml up -d --no-build caddy"
+echo "    docker compose -f docker-compose-dirty.yml up -d caddy"

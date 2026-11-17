@@ -81,14 +81,18 @@ docker login ccr.ccs.tencentyun.com
 bash scripts/mirror-images.sh
 ```
 
-脚本会把 CrowdSec 和两个 Caddy 基础镜像推送到 `ccr.ccs.tencentyun.com/vpn-server/`。提示仓库不存在时，先在容器镜像服务控制台创建 `crowdsec` 和 `caddy` 两个仓库。然后在服务器的 `.env` 中设置：
+脚本会把 CrowdSec，以及构建用的 Caddy、Node 基础镜像推送到 `ccr.ccs.tencentyun.com/vpn-server/`。提示仓库不存在时，先在容器镜像服务控制台创建 `crowdsec`、`caddy`、`node` 仓库。然后在服务器 `.env` 的“镜像地址”一节设置：
 
 ```ini
 CROWDSEC_IMAGE=ccr.ccs.tencentyun.com/vpn-server/crowdsec:v1.8.2
-CADDY_BASE_REGISTRY=ccr.ccs.tencentyun.com/vpn-server/
 ```
 
-`CADDY_BASE_REGISTRY` 只影响编译 Caddy 镜像。如果按“第 2 步 方式一”在别的机器上编译好推送，服务器只拉 `CADDY_IMAGE`，可以不设。
+构建机也连不上 Docker Hub 时，再在构建机 `.env` 的“构建 / 同步镜像”一节设置下面两项。它们只影响 `scripts/build-images.sh` 编译 Caddy 和 ops-ui，服务器不需要：
+
+```ini
+CADDY_BASE_REGISTRY=ccr.ccs.tencentyun.com/vpn-server/
+OPS_UI_BASE_REGISTRY=ccr.ccs.tencentyun.com/vpn-server/
+```
 
 ## 第 1 步：准备 .env
 
@@ -142,25 +146,25 @@ CADDY_TLS=off
 
 ### 其他配置项
 
-| 变量                          | 默认值                                                  | 说明                                                                                                                                              |
-| ----------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WG_ADMIN_GATE`               | `on`                                                    | `on` 管理后台只允许管理员 IP；`off` 不按来源 IP 限制，所有 IP 都能打开登录页                                                                      |
-| `WG_PUBLIC_PATHS`             | 见说明                                                  | 所有 IP 都能访问的路径，默认 `/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*`，其余只允许管理员 IP                                   |
-| `RL_PUBLIC_PER_MIN`           | `30`                                                    | 公开接口每个 IP 每分钟的请求上限                                                                                                                  |
-| `CADDY_HSTS`                  | `max-age=0`                                             | 换成正式证书并稳定运行后改为 `max-age=31536000`                                                                                                   |
-| `RL_LOGIN_PER_MIN`            | `5`                                                     | 每个 IP 每分钟允许的登录和 2FA 请求次数                                                                                                           |
-| `RL_LOGIN_PER_HOUR`           | `30`                                                    | 每个 IP 每小时允许的登录和 2FA 请求次数                                                                                                           |
-| `CADDY_DNS_RESOLVERS`         | `119.29.29.29 223.5.5.5`                                | DNS 验证时检查 TXT 记录用的 DNS 服务器                                                                                                            |
-| `CROWDSEC_DISABLE_ONLINE_API` | `false`                                                 | `true` 表示只在本地运行，不连 CrowdSec 中央服务器，也收不到社区黑名单                                                                             |
-| `CROWDSEC_ENROLL_KEY`         | 空                                                      | 可选，填入后实例会出现在 app.crowdsec.net 控制台                                                                                                  |
-| `CROWDSEC_IMAGE`              | `crowdsecurity/crowdsec:v1.8.2`                         | Docker Hub 拉不下来时改用 CCR，见“服务器连不上 Docker Hub”                                                                                        |
-| `WG_SERVER_IMAGE`             | `ccr.ccs.tencentyun.com/vpn-server/wg-easy:latest`      | wg-easy 镜像（本库带 LiveWireGuard 接口）；不要换成官方 `ghcr.io/wg-easy/wg-easy`，否则同步配置一直 404。上游的 `WG_EASY_IMAGE` 本库 compose 不读 |
-| `OPS_UI_IMAGE`                | `wg-easy-ops-ui:local`                                  | 运维页面镜像；留空本地构建，填仓库地址则直接拉取                                                                                                  |
-| `CADDY_BASE_REGISTRY`         | 空                                                      | 编译 Caddy 的基础镜像前缀，末尾带 `/`，如 `ccr.ccs.tencentyun.com/vpn-server/`                                                                    |
-| `CROWDSEC_NOTIFY`             | 空                                                      | 封禁通知渠道：`wecom`、`dingtalk`、`telegram`，留空不推送，见“封禁通知”一节                                                                       |
-| `CADDY_IMAGE`                 | 空                                                      | 服务器直接拉取的 Caddy 镜像；留空则使用本地镜像或现场编译                                                                                         |
-| `CADDY_IMAGE_REPO`            | `ccr.ccs.tencentyun.com/vpn-server/caddy-ratelimit-dns` | `scripts/caddy-image.sh` 的推送目标                                                                                                               |
-| `CADDY_VERSION`               | `2`                                                     | 插件与最新 Caddy 不兼容导致编译失败时，固定到较早的小版本，如 `2.9`                                                                               |
+| 变量                                           | 默认值                                                  | 说明                                                                                                                                              |
+| ---------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WG_ADMIN_GATE`                                | `on`                                                    | `on` 管理后台只允许管理员 IP；`off` 不按来源 IP 限制，所有 IP 都能打开登录页                                                                      |
+| `WG_PUBLIC_PATHS`                              | 见说明                                                  | 所有 IP 都能访问的路径，默认 `/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*`，其余只允许管理员 IP                                   |
+| `RL_PUBLIC_PER_MIN`                            | `30`                                                    | 公开接口每个 IP 每分钟的请求上限                                                                                                                  |
+| `CADDY_HSTS`                                   | `max-age=0`                                             | 换成正式证书并稳定运行后改为 `max-age=31536000`                                                                                                   |
+| `RL_LOGIN_PER_MIN`                             | `5`                                                     | 每个 IP 每分钟允许的登录和 2FA 请求次数                                                                                                           |
+| `RL_LOGIN_PER_HOUR`                            | `30`                                                    | 每个 IP 每小时允许的登录和 2FA 请求次数                                                                                                           |
+| `CADDY_DNS_RESOLVERS`                          | `119.29.29.29 223.5.5.5`                                | DNS 验证时检查 TXT 记录用的 DNS 服务器                                                                                                            |
+| `CROWDSEC_DISABLE_ONLINE_API`                  | `false`                                                 | `true` 表示只在本地运行，不连 CrowdSec 中央服务器，也收不到社区黑名单                                                                             |
+| `CROWDSEC_ENROLL_KEY`                          | 空                                                      | 可选，填入后实例会出现在 app.crowdsec.net 控制台                                                                                                  |
+| `CROWDSEC_IMAGE`                               | `crowdsecurity/crowdsec:v1.8.2`                         | Docker Hub 拉不下来时改用 CCR，见“服务器连不上 Docker Hub”                                                                                        |
+| `WG_SERVER_IMAGE`                              | `ccr.ccs.tencentyun.com/vpn-server/wg-easy:latest`      | wg-easy 镜像（本库带 LiveWireGuard 接口）；不要换成官方 `ghcr.io/wg-easy/wg-easy`，否则同步配置一直 404。上游的 `WG_EASY_IMAGE` 本库 compose 不读 |
+| `OPS_UI_IMAGE`                                 | `ccr.ccs.tencentyun.com/vpn-server/ops-ui:latest`       | 运维页面镜像，由 `scripts/build-images.sh ops-ui` 构建推送                                                                                        |
+| `CADDY_BASE_REGISTRY` / `OPS_UI_BASE_REGISTRY` | 空                                                      | 仅构建机：编译 Caddy / ops-ui 的基础镜像前缀，末尾带 `/`，如 `ccr.ccs.tencentyun.com/vpn-server/`                                                 |
+| `CROWDSEC_NOTIFY`                              | 空                                                      | 封禁通知渠道：`wecom`、`dingtalk`、`telegram`，留空不推送，见“封禁通知”一节                                                                       |
+| `CADDY_IMAGE`                                  | `ccr.ccs.tencentyun.com/vpn-server/caddy:ratelimit-dns` | Caddy 镜像（限流 + DNS 插件 + CrowdSec），由 `scripts/build-images.sh caddy` 构建推送                                                             |
+| `CADDY_IMAGE_REPO` / `OPS_UI_IMAGE_REPO`       | `.../vpn-server/caddy`、`.../vpn-server/ops-ui`         | 仅构建机：`scripts/build-images.sh` 的推送目标                                                                                                    |
+| `CADDY_VERSION`                                | `2`                                                     | 仅构建机：插件与最新 Caddy 不兼容导致编译失败时，固定到较早的小版本，如 `2.9`                                                                     |
 
 ### 使用已有证书
 
@@ -205,7 +209,7 @@ CADDY_TLS=off
 
 ## 第 2 步：准备 Caddy 镜像
 
-官方 Caddy 镜像不包含限流、DNS 验证和 CrowdSec 插件，需要自己编译。
+官方 Caddy 镜像不包含限流、DNS 验证和 CrowdSec 插件，需要自己编译；运维页面 ops-ui 的镜像也要自己构建。`docker-compose-dirty.yml` 只拉取镜像、不构建，四个镜像地址都在 `.env` 开头的“镜像地址”一节。wg-easy（本库镜像）和 CrowdSec（官方镜像）不需要构建。
 
 ### 方式一：构建后推送到镜像仓库（推荐）
 
@@ -213,34 +217,42 @@ CADDY_TLS=off
 
 ```shell
 docker login ccr.ccs.tencentyun.com
-bash scripts/caddy-image.sh --no-push    # 先只构建和检查
-bash scripts/caddy-image.sh              # 构建、检查并推送
+bash scripts/build-images.sh --no-push   # 先只构建和检查 caddy、ops-ui
+bash scripts/build-images.sh             # 构建、检查并推送
+bash scripts/build-images.sh caddy       # 只做其中一个（caddy 或 ops-ui）
 ```
 
-脚本会检查镜像里的插件是否齐全，并在 4 种证书模式下分别运行 `caddy validate`，任何一项失败都不会推送。推送成功后会打印一个带日期和提交号的固定标签，填到服务器的 `.env`：
+- caddy：调用 `scripts/caddy-image.sh`，检查插件是否齐全，并在多种证书模式下分别运行 `caddy validate`。推送到 `ccr.ccs.tencentyun.com/vpn-server/caddy`，标签 `ratelimit-dns`（compose 默认）、`ratelimit-dns-<版本>`、`ratelimit-dns-<版本>-<日期>-<提交号>`
+- ops-ui：先跑单元测试，构建后按 compose 里的限制（只读、去掉全部权限）启动一次，检查 `/healthz`。推送到 `ccr.ccs.tencentyun.com/vpn-server/ops-ui`，标签 `latest`（compose 默认）、`<版本>`、`<版本>-<日期>-<提交号>`
+
+某一项检查失败时这一项不推送，其余照常进行。首次推送前在容器镜像服务控制台创建 `caddy`、`ops-ui` 两个仓库。
+
+`.env` 不改时用默认的浮动标签（`caddy:ratelimit-dns`、`ops-ui:latest`，指向最近一次推送）。建议把脚本最后打印的固定标签填到服务器 `.env`，便于回滚：
 
 ```ini
-CADDY_IMAGE=ccr.ccs.tencentyun.com/vpn-server/caddy-ratelimit-dns:2.10.2-20261109-abc1234
+CADDY_IMAGE=ccr.ccs.tencentyun.com/vpn-server/caddy:ratelimit-dns-2.10.2-20261117-abc1234
+OPS_UI_IMAGE=ccr.ccs.tencentyun.com/vpn-server/ops-ui:0.1.0-20261117-abc1234
 ```
 
-其他参数：`--platform linux/amd64,linux/arm64` 构建多架构镜像，`--no-latest` 不更新 `latest` 标签，`-h` 查看帮助。
+其他参数：`--platform linux/amd64,linux/arm64` 构建多架构镜像，`--no-latest` 不更新浮动标签，`-h` 查看帮助。
 
 ### 方式二：在服务器上直接编译
 
 ```shell
-docker compose -f docker-compose-dirty.yml build caddy
-docker compose -f docker-compose-dirty.yml run --rm --no-deps caddy \
-    caddy validate --config /etc/caddy/Caddyfile
+bash scripts/build-images.sh --no-push caddy
 ```
+
+检查内容和方式一相同，镜像只留在本机。把 `.env` 的 `CADDY_IMAGE` 设为脚本最后打印的固定标签。之后启动时不要拉取 caddy（仓库里没有这个标签），见下面第 3 步。
 
 ## 第 3 步：启动
 
 ```shell
-# 使用方式一的镜像
-docker compose -f docker-compose-dirty.yml pull caddy
-docker compose -f docker-compose-dirty.yml up -d --no-build
+# 方式一
+docker compose -f docker-compose-dirty.yml pull
+docker compose -f docker-compose-dirty.yml up -d
 
-# 使用方式二
+# 方式二：caddy 用本机编译的镜像，只拉另外两个
+docker compose -f docker-compose-dirty.yml pull wg-easy crowdsec
 docker compose -f docker-compose-dirty.yml up -d
 ```
 
@@ -586,13 +598,14 @@ bash scripts/log-stats.sh --selftest               # 用内置样本自测，不
 
 ```shell
 # 1. .env 中取消 COMPOSE_PROFILES=ops 那一行的注释，并填写 OPS_UI_PASSWORD（建议 openssl rand -base64 18 生成）
-# 2. 构建并启动 ops-ui，再重建 caddy 加载 /ops 路由
-docker compose -f docker-compose-dirty.yml up -d --build ops-ui
-docker compose -f docker-compose-dirty.yml up -d --no-build --force-recreate caddy
+# 2. 拉取并启动 ops-ui（镜像地址见 .env 的 OPS_UI_IMAGE），再重建 caddy 加载 /ops 路由
+docker compose -f docker-compose-dirty.yml pull ops-ui
+docker compose -f docker-compose-dirty.yml up -d ops-ui
+docker compose -f docker-compose-dirty.yml up -d --force-recreate caddy
 # 3. 浏览器打开 https://<WG_WEB_HOST>:51821/ops/
 ```
 
-连不上 Docker Hub 时先用 `scripts/mirror-images.sh` 同步 `node:22-alpine`，再在 `.env` 设置 `OPS_UI_BASE_REGISTRY`（如 `ccr.ccs.tencentyun.com/vpn-server/`，末尾带 `/`）。
+ops-ui 镜像在构建机上用 `bash scripts/build-images.sh ops-ui` 构建推送，见“第 2 步”。构建机连不上 Docker Hub 时，先用 `scripts/mirror-images.sh` 同步 `node:22-alpine`，再在构建机 `.env` 设置 `OPS_UI_BASE_REGISTRY`（如 `ccr.ccs.tencentyun.com/vpn-server/`，末尾带 `/`）。
 
 安全设计：
 
@@ -668,14 +681,14 @@ docker restart wg-easy-crowdsec
 
 ### 更新和回滚 Caddy 镜像
 
-在构建机上重新运行 `bash scripts/caddy-image.sh`，把新的固定标签填到服务器 `.env` 的 `CADDY_IMAGE`，然后：
+在构建机上重新运行 `bash scripts/build-images.sh`（只更新 Caddy 时加 `caddy`），把新的固定标签填到服务器 `.env` 的 `CADDY_IMAGE`、`OPS_UI_IMAGE`，然后：
 
 ```shell
-docker compose -f docker-compose-dirty.yml pull caddy
-docker compose -f docker-compose-dirty.yml up -d --no-build caddy
+docker compose -f docker-compose-dirty.yml pull caddy ops-ui
+docker compose -f docker-compose-dirty.yml up -d caddy ops-ui
 ```
 
-回滚时把 `CADDY_IMAGE` 改回旧标签，再执行一次上面两条命令。
+回滚时把这两个变量改回旧标签，再执行一次上面两条命令。没启用 ops-ui 时去掉命令里的 `ops-ui`。
 
 ### 更新 CrowdSec 规则
 

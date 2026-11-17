@@ -74,18 +74,10 @@ services:
       - net.ipv6.conf.default.forwarding=1
 
   caddy:
-    # 官方镜像不含限流和 DNS 插件，本地用 xcaddy 编译（见 caddy/Dockerfile）
-    # 推荐：在构建机运行 scripts/caddy-image.sh 推到 CCR，服务器 .env 设置 CADDY_IMAGE 后
-    #   docker compose -f docker-compose-dirty.yml pull caddy && docker compose -f docker-compose-dirty.yml up -d --no-build
-    # 未设置 CADDY_IMAGE 时使用本地标签，镜像不存在则按下面的 build 现场编译
-    build:
-      context: ./caddy
-      args:
-        CADDY_VERSION: ${CADDY_VERSION:-2}
-        # 基础镜像前缀，留空 = Docker Hub；连不上时见 scripts/mirror-images.sh
-        CADDY_BASE_REGISTRY: ${CADDY_BASE_REGISTRY:-}
-        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
-    image: ${CADDY_IMAGE:-wg-easy-caddy:ratelimit-dns}
+    # 官方镜像不含限流、DNS 插件和 CrowdSec，用自编译镜像（源码 caddy/Dockerfile）
+    # compose 只拉取不构建：在构建机运行 bash scripts/build-images.sh caddy 推到 CCR，地址在 .env 的 CADDY_IMAGE
+    # 服务器上现场编译：bash scripts/build-images.sh --no-push caddy（镜像留在本机，up 时直接使用）
+    image: ${CADDY_IMAGE:-ccr.ccs.tencentyun.com/vpn-server/caddy:ratelimit-dns}
     container_name: wg-easy-caddy
     depends_on:
       - wg-easy
@@ -203,18 +195,13 @@ services:
 
   # 运维页面（可选）：访问日志统计、CrowdSec 封禁列表、实时请求、连通性诊断，见 ops-ui/
   # 启用：.env 设 COMPOSE_PROFILES=ops 和 OPS_UI_PASSWORD，然后
-  #   docker compose -f docker-compose-dirty.yml up -d --build ops-ui
+  #   docker compose -f docker-compose-dirty.yml pull ops-ui && docker compose -f docker-compose-dirty.yml up -d ops-ui
   # 访问：https://<WG_WEB_HOST>:51821/ops/ —— 经 Caddy 反代，同样受管理员 IP 开关、CrowdSec 封禁和 HTTPS 保护，
   #   不单独发布端口，也不挂载 docker.sock；封禁列表只读，解封仍用 cscli
   ops-ui:
     profiles: ["ops"]
-    build:
-      context: ./ops-ui
-      args:
-        NODE_BASE_REGISTRY: ${OPS_UI_BASE_REGISTRY:-}
-    # 默认本地构建（docker compose build ops-ui）；在 .env 设 OPS_UI_IMAGE=<仓库地址:标签> 则直接拉取
-    # 本地标签不在任何仓库里，docker compose pull 对它会报 pull access denied，属正常，不影响 up
-    image: ${OPS_UI_IMAGE:-wg-easy-ops-ui:local}
+    # compose 只拉取不构建：镜像由 bash scripts/build-images.sh ops-ui 构建推送（源码 ops-ui/），地址在 .env 的 OPS_UI_IMAGE
+    image: ${OPS_UI_IMAGE:-ccr.ccs.tencentyun.com/vpn-server/ops-ui:latest}
     container_name: wg-easy-ops-ui
     restart: unless-stopped
     read_only: true

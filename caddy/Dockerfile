@@ -10,7 +10,7 @@ ARG CADDY_VERSION=2
 ARG CADDY_BASE_REGISTRY=
 
 FROM ${CADDY_BASE_REGISTRY}caddy:${CADDY_VERSION}-builder-alpine AS builder
-# 国内构建加速；海外机器可在 compose build.args 里改成 https://proxy.golang.org,direct
+# 国内构建加速；海外构建机在 .env 设 GOPROXY=https://proxy.golang.org,direct（由 scripts/caddy-image.sh 传入）
 ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY}
 RUN xcaddy build \

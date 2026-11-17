@@ -104,9 +104,10 @@ if [ ${#failed[@]} -gt 0 ]; then
   exit 1
 fi
 
-echo "✔ 同步完成。在服务器的 .env 中设置："
+echo "✔ 同步完成。在服务器 .env 的“镜像地址”一节设置："
 echo "    CROWDSEC_IMAGE=$NS/crowdsec:$CROWDSEC_VERSION"
-echo "    CADDY_BASE_REGISTRY=$NS/"
-echo "    OPS_UI_BASE_REGISTRY=$NS/      # 启用运维页面 ops-ui 时"
 echo "然后执行："
-echo "    docker compose -f docker-compose-dirty.yml up -d"
+echo "    docker compose -f docker-compose-dirty.yml pull crowdsec && docker compose -f docker-compose-dirty.yml up -d crowdsec"
+echo "构建机也连不上 Docker Hub 时，在构建机 .env 的“构建 / 同步镜像”一节设置（scripts/build-images.sh 用）："
+echo "    CADDY_BASE_REGISTRY=$NS/"
+echo "    OPS_UI_BASE_REGISTRY=$NS/"

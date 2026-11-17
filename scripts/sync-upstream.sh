@@ -40,7 +40,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-OUR_SCRIPTS="scripts/admin-ips.sh scripts/caddy-image.sh scripts/diagnose-public.sh scripts/mirror-images.sh \
+OUR_SCRIPTS="scripts/admin-ips.sh scripts/build-images.sh scripts/caddy-image.sh scripts/diagnose-public.sh scripts/mirror-images.sh \
 scripts/sync-upstream.sh deploy/wg-easy-hairpin.sh"
 KEEP_OURS="caddy/* crowdsec/* deploy/* $OUR_SCRIPTS docker-compose-dirty.yml \
 docs/content/examples/tutorials/caddy-crowdsec.md .gitattributes .githooks/* commit.sh ${SYNC_KEEP_OURS:-}"
