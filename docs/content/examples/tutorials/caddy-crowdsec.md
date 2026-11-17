@@ -142,23 +142,25 @@ CADDY_TLS=off
 
 ### 其他配置项
 
-| 变量                          | 默认值                                                  | 说明                                                                                                            |
-| ----------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `WG_ADMIN_GATE`               | `on`                                                    | `on` 管理后台只允许管理员 IP；`off` 不按来源 IP 限制，所有 IP 都能打开登录页                                    |
-| `WG_PUBLIC_PATHS`             | 见说明                                                  | 所有 IP 都能访问的路径，默认 `/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*`，其余只允许管理员 IP |
-| `RL_PUBLIC_PER_MIN`           | `30`                                                    | 公开接口每个 IP 每分钟的请求上限                                                                                |
-| `CADDY_HSTS`                  | `max-age=0`                                             | 换成正式证书并稳定运行后改为 `max-age=31536000`                                                                 |
-| `RL_LOGIN_PER_MIN`            | `5`                                                     | 每个 IP 每分钟允许的登录和 2FA 请求次数                                                                         |
-| `RL_LOGIN_PER_HOUR`           | `30`                                                    | 每个 IP 每小时允许的登录和 2FA 请求次数                                                                         |
-| `CADDY_DNS_RESOLVERS`         | `119.29.29.29 223.5.5.5`                                | DNS 验证时检查 TXT 记录用的 DNS 服务器                                                                          |
-| `CROWDSEC_DISABLE_ONLINE_API` | `false`                                                 | `true` 表示只在本地运行，不连 CrowdSec 中央服务器，也收不到社区黑名单                                           |
-| `CROWDSEC_ENROLL_KEY`         | 空                                                      | 可选，填入后实例会出现在 app.crowdsec.net 控制台                                                                |
-| `CROWDSEC_IMAGE`              | `crowdsecurity/crowdsec:v1.8.2`                         | Docker Hub 拉不下来时改用 CCR，见“服务器连不上 Docker Hub”                                                      |
-| `CADDY_BASE_REGISTRY`         | 空                                                      | 编译 Caddy 的基础镜像前缀，末尾带 `/`，如 `ccr.ccs.tencentyun.com/vpn-server/`                                  |
-| `CROWDSEC_NOTIFY`             | 空                                                      | 封禁通知渠道：`wecom`、`dingtalk`、`telegram`，留空不推送，见“封禁通知”一节                                     |
-| `CADDY_IMAGE`                 | 空                                                      | 服务器直接拉取的 Caddy 镜像；留空则使用本地镜像或现场编译                                                       |
-| `CADDY_IMAGE_REPO`            | `ccr.ccs.tencentyun.com/vpn-server/caddy-ratelimit-dns` | `scripts/caddy-image.sh` 的推送目标                                                                             |
-| `CADDY_VERSION`               | `2`                                                     | 插件与最新 Caddy 不兼容导致编译失败时，固定到较早的小版本，如 `2.9`                                             |
+| 变量                          | 默认值                                                  | 说明                                                                                                                                              |
+| ----------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WG_ADMIN_GATE`               | `on`                                                    | `on` 管理后台只允许管理员 IP；`off` 不按来源 IP 限制，所有 IP 都能打开登录页                                                                      |
+| `WG_PUBLIC_PATHS`             | 见说明                                                  | 所有 IP 都能访问的路径，默认 `/api/livewireguard/* /api/auth/oidc /api/auth/oidc/* /cnf/*`，其余只允许管理员 IP                                   |
+| `RL_PUBLIC_PER_MIN`           | `30`                                                    | 公开接口每个 IP 每分钟的请求上限                                                                                                                  |
+| `CADDY_HSTS`                  | `max-age=0`                                             | 换成正式证书并稳定运行后改为 `max-age=31536000`                                                                                                   |
+| `RL_LOGIN_PER_MIN`            | `5`                                                     | 每个 IP 每分钟允许的登录和 2FA 请求次数                                                                                                           |
+| `RL_LOGIN_PER_HOUR`           | `30`                                                    | 每个 IP 每小时允许的登录和 2FA 请求次数                                                                                                           |
+| `CADDY_DNS_RESOLVERS`         | `119.29.29.29 223.5.5.5`                                | DNS 验证时检查 TXT 记录用的 DNS 服务器                                                                                                            |
+| `CROWDSEC_DISABLE_ONLINE_API` | `false`                                                 | `true` 表示只在本地运行，不连 CrowdSec 中央服务器，也收不到社区黑名单                                                                             |
+| `CROWDSEC_ENROLL_KEY`         | 空                                                      | 可选，填入后实例会出现在 app.crowdsec.net 控制台                                                                                                  |
+| `CROWDSEC_IMAGE`              | `crowdsecurity/crowdsec:v1.8.2`                         | Docker Hub 拉不下来时改用 CCR，见“服务器连不上 Docker Hub”                                                                                        |
+| `WG_SERVER_IMAGE`             | `ccr.ccs.tencentyun.com/vpn-server/wg-easy:latest`      | wg-easy 镜像（本库带 LiveWireGuard 接口）；不要换成官方 `ghcr.io/wg-easy/wg-easy`，否则同步配置一直 404。上游的 `WG_EASY_IMAGE` 本库 compose 不读 |
+| `OPS_UI_IMAGE`                | `wg-easy-ops-ui:local`                                  | 运维页面镜像；留空本地构建，填仓库地址则直接拉取                                                                                                  |
+| `CADDY_BASE_REGISTRY`         | 空                                                      | 编译 Caddy 的基础镜像前缀，末尾带 `/`，如 `ccr.ccs.tencentyun.com/vpn-server/`                                                                    |
+| `CROWDSEC_NOTIFY`             | 空                                                      | 封禁通知渠道：`wecom`、`dingtalk`、`telegram`，留空不推送，见“封禁通知”一节                                                                       |
+| `CADDY_IMAGE`                 | 空                                                      | 服务器直接拉取的 Caddy 镜像；留空则使用本地镜像或现场编译                                                                                         |
+| `CADDY_IMAGE_REPO`            | `ccr.ccs.tencentyun.com/vpn-server/caddy-ratelimit-dns` | `scripts/caddy-image.sh` 的推送目标                                                                                                               |
+| `CADDY_VERSION`               | `2`                                                     | 插件与最新 Caddy 不兼容导致编译失败时，固定到较早的小版本，如 `2.9`                                                                               |
 
 ### 使用已有证书
 

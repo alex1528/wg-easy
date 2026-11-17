@@ -1,6 +1,8 @@
 services:
   wg-easy:
-    image: ccr.ccs.tencentyun.com/vpn-server/wg-easy:latest
+    # 镜像地址可在 .env 用 WG_SERVER_IMAGE 指定（本库带 LiveWireGuard 接口的镜像）
+    # 注意不是 WG_EASY_IMAGE：那个是上游 docker-compose.dirty.yml 用的，默认指向官方镜像（没有 LiveWireGuard 接口）
+    image: ${WG_SERVER_IMAGE:-ccr.ccs.tencentyun.com/vpn-server/wg-easy:latest}
     container_name: wg-easy
     # 启动包装：先加隧道内访问 Web UI 的转发规则，再执行原来的启动命令
     # 覆盖 entrypoint 后镜像默认的 CMD 不再生效，所以 command 要写全
@@ -210,6 +212,8 @@ services:
       context: ./ops-ui
       args:
         NODE_BASE_REGISTRY: ${OPS_UI_BASE_REGISTRY:-}
+    # 默认本地构建（docker compose build ops-ui）；在 .env 设 OPS_UI_IMAGE=<仓库地址:标签> 则直接拉取
+    # 本地标签不在任何仓库里，docker compose pull 对它会报 pull access denied，属正常，不影响 up
     image: ${OPS_UI_IMAGE:-wg-easy-ops-ui:local}
     container_name: wg-easy-ops-ui
     restart: unless-stopped
